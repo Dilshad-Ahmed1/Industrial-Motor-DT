@@ -7,6 +7,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
+RESULTS800 = ROOT / "RESULTS" / "800s"
 REALTIME_DIR = RESULTS / "realtime_matrix_v1"
 FIGURES = RESULTS / "figures"
 FIGURES.mkdir(exist_ok=True)
@@ -84,7 +85,7 @@ def load_run(path: Path, run_kind: str) -> dict:
 def collect() -> pd.DataFrame:
     simulation = [
         load_run(path, "simulation")
-        for path in sorted(RESULTS.glob("*_7700s.csv"))
+        for path in sorted(RESULTS800.glob("*_800s.csv"))
         if "basyx" not in path.name
     ]
     realtime = [

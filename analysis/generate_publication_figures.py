@@ -16,7 +16,7 @@ RESULTS = ROOT / "results"
 OUT = RESULTS / "figures"
 OUT.mkdir(exist_ok=True)
 
-compare = pd.read_csv(RESULTS / "compare.csv")
+compare = pd.read_csv(RESULTS / "analysis_results.csv")
 
 scenario_order = [
     "healthy",
@@ -565,7 +565,7 @@ save_fig(fig, "fault_architecture.png")
 # ============================================================
 
 combined_files = {
-    controller: RESULTS / f"combined_{controller}_1800s.csv"
+    controller: RESULTS / f"combined_{controller}_7700s.csv"
     for controller in controller_order
 }
 
@@ -626,7 +626,7 @@ fig, ax = plt.subplots(figsize=(12, 7))
 for controller in controller_order:
 
     df = pd.read_csv(
-        RESULTS / f"combined_{controller}_1800s.csv"
+        RESULTS / f"combined_{controller}_7700s.csv"
     )
 
     ax.plot(
@@ -662,7 +662,7 @@ save_fig(fig, "load_command_trajectories.png")
 controller = "constrained"
 
 df = pd.read_csv(
-    RESULTS / f"combined_{controller}_1800s.csv"
+    RESULTS / f"combined_{controller}_7700s.csv"
 )
 
 fig, ax = plt.subplots(figsize=(12, 7))
