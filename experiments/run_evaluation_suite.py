@@ -31,6 +31,7 @@ def run_one(
     step: float,
     fault_time: float,
     output_dir: Path,
+    realtime: bool = False,
 ) -> Path:
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -68,6 +69,9 @@ def run_one(
         "--output",
         str(output.resolve()),
     ]
+
+    if realtime:
+        cmd.append("--realtime")
 
     result = subprocess.run(cmd)
 
@@ -140,6 +144,12 @@ def main() -> int:
         default="all",
     )
 
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help="Pace every case against wall clock and record deadline metrics.",
+    )
+
     args = parser.parse_args()
 
     if not args.fmu.exists():
@@ -173,6 +183,7 @@ def main() -> int:
     print(f"Step         : {args.step} s")
     print(f"Fault time   : {args.fault_time} s")
     print(f"Output dir   : {args.output_dir.resolve()}")
+    print(f"Realtime     : {args.realtime}")
     print("=" * 72)
 
     completed = []
@@ -188,6 +199,7 @@ def main() -> int:
                 step=args.step,
                 fault_time=args.fault_time,
                 output_dir=args.output_dir,
+                realtime=args.realtime,
             )
 
             completed.append(output)

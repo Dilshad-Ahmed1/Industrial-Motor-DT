@@ -463,6 +463,7 @@ def run_experiment(
     basyx_enabled: bool = False,
     basyx_host: str = "http://localhost:8081",
     basyx_period_s: float = 2.0,
+    realtime: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
 
     # -------------------------
@@ -648,6 +649,11 @@ def run_experiment(
         else None
     )
 
+    realtime_wall_start = None
+    realtime_wall_elapsed_s = None
+    realtime_deadline_misses = 0
+    realtime_cycle_latencies_ms: list[float] = []
+
     # -------------------------
     # FMU runtime
     # -------------------------
@@ -685,10 +691,22 @@ def run_experiment(
         # Closed-loop simulation
         # ---------------------------------------------------------------
 
+        if realtime:
+            realtime_wall_start = time.perf_counter()
+
         while runtime.current_time < stop_time - 1e-12:
 
             # Current simulation instant.
             t = runtime.current_time
+
+            if realtime and realtime_wall_start is not None:
+                scheduled_start = realtime_wall_start + t
+                wait_s = scheduled_start - time.perf_counter()
+                if wait_s > 0.0:
+                    time.sleep(wait_s)
+                cycle_wall_start = time.perf_counter()
+            else:
+                cycle_wall_start = time.perf_counter()
 
             # Fault state is determined from simulation time.
             fault_active = t >= fault_time
@@ -1037,6 +1055,37 @@ def run_experiment(
                 inputs,
             )
 
+            cycle_wall_end = time.perf_counter()
+            realtime_cycle_latency_ms = (
+                cycle_wall_end - cycle_wall_start
+            ) * 1000.0
+            realtime_deadline_ms = actual_step * 1000.0
+            realtime_deadline_missed = int(
+                realtime
+                and realtime_cycle_latency_ms
+                > realtime_deadline_ms + 1e-6
+            )
+
+            if realtime:
+                realtime_cycle_latencies_ms.append(
+                    realtime_cycle_latency_ms
+                )
+                realtime_deadline_misses += (
+                    realtime_deadline_missed
+                )
+
+                if realtime_wall_start is not None:
+                    scheduled_end = (
+                        realtime_wall_start
+                        + t
+                        + actual_step
+                    )
+                    remaining_s = (
+                        scheduled_end - time.perf_counter()
+                    )
+                    if remaining_s > 0.0:
+                        time.sleep(remaining_s)
+
             # -----------------------------------------------------------
             # 7. LOG STATE AT THE CORRESPONDING SIMULATION TIME
             # -----------------------------------------------------------
@@ -1278,6 +1327,18 @@ def run_experiment(
                 "solver_step_time_s": float(
                     solver_time_s
                 ),
+
+                "realtime_cycle_latency_ms": float(
+                    realtime_cycle_latency_ms
+                ),
+
+                "realtime_deadline_ms": float(
+                    realtime_deadline_ms
+                ),
+
+                "realtime_deadline_missed": int(
+                    realtime_deadline_missed
+                ),
             }
 
             # -----------------------------------------------------------
@@ -1294,6 +1355,11 @@ def run_experiment(
 
             current_command = next_command
             measurement = post_measurement
+
+        if realtime and realtime_wall_start is not None:
+            realtime_wall_elapsed_s = (
+                time.perf_counter() - realtime_wall_start
+            )
 
     # -------------------------------------------------------------------
     # Build DataFrame
@@ -1338,6 +1404,48 @@ def run_experiment(
         safe_temp_threshold_c=critical_C,
         nominal_temp_c=warning_C,
     )
+
+    if realtime and realtime_wall_start is not None:
+        realtime_wall_time_s = float(
+            realtime_wall_elapsed_s or 0.0
+        )
+        latency_series = pd.Series(
+            realtime_cycle_latencies_ms,
+            dtype=float,
+        )
+        metrics.update(
+            {
+                "realtime_enabled": True,
+                "realtime_wall_time_s": float(
+                    realtime_wall_time_s
+                ),
+                "realtime_factor": float(
+                    stop_time / max(realtime_wall_time_s, 1e-9)
+                ),
+                "realtime_deadline_ms": float(
+                    step * 1000.0
+                ),
+                "realtime_deadline_misses": int(
+                    realtime_deadline_misses
+                ),
+                "realtime_deadline_miss_rate_percent": (
+                    float(realtime_deadline_misses)
+                    / max(len(realtime_cycle_latencies_ms), 1)
+                    * 100.0
+                ),
+                "realtime_cycle_latency_mean_ms": float(
+                    latency_series.mean()
+                ),
+                "realtime_cycle_latency_p95_ms": float(
+                    latency_series.quantile(0.95)
+                ),
+                "realtime_cycle_latency_max_ms": float(
+                    latency_series.max()
+                ),
+            }
+        )
+    else:
+        metrics["realtime_enabled"] = False
 
 
     if basyx_metrics is not None:
@@ -1505,9 +1613,28 @@ def run_experiment(
     )
 
     print(
-        "Real-time factor             : "
+        "Solver real-time factor      : "
         f"{metrics['real_time_factor']:.3f}"
     )
+
+    if realtime:
+        print(
+            "Wall-clock real-time factor : "
+            f"{metrics['realtime_factor']:.3f}"
+        )
+        print(
+            "Wall-clock elapsed          : "
+            f"{metrics['realtime_wall_time_s']:.3f} s"
+        )
+        print(
+            "Wall-clock deadline misses  : "
+            f"{metrics['realtime_deadline_misses']}"
+        )
+        print(
+            "Wall-clock cycle mean / P95 : "
+            f"{metrics['realtime_cycle_latency_mean_ms']:.3f} / "
+            f"{metrics['realtime_cycle_latency_p95_ms']:.3f} ms"
+        )
 
     if controller_name == "constrained":
 
@@ -1617,6 +1744,15 @@ def main() -> int:
         ),
     )
 
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help=(
+            "Pace the simulation against wall clock and record "
+            "control-cycle deadline misses."
+        ),
+    )
+
     args = parser.parse_args()
 
     print(
@@ -1650,6 +1786,7 @@ def main() -> int:
         basyx_enabled=args.basyx,
         basyx_host=args.basyx_host,
         basyx_period_s=args.basyx_period,
+        realtime=args.realtime,
     )
 
     return 0

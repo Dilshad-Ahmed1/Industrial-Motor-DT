@@ -6,8 +6,9 @@ This manifest freezes the engineering implementation, scenario matrix, data prod
 
 - Project root: `C:\Users\dilsh\Documents\Industry 5.0`
 - Date frozen: 2026-09-29
-- Evidence set: `results/compare.csv`
-- BaSyx timing summary: `results/compare_basyx_metrics.csv`
+- Long-horizon simulation evidence: `results/analysis_results.csv`
+- Wall-clock validation evidence: `results/realtime_matrix_v1/`
+- Simulation versus wall-clock summary: `results/realtime_vs_simulation_summary.csv`
 - Active controller set: `baseline`, `adaptive`, `constrained`
 - Discarded exploratory controller: `energy_aware` (not part of the manuscript evidence)
 
@@ -28,13 +29,24 @@ This manifest freezes the engineering implementation, scenario matrix, data prod
 
 ### Simulation protocol
 
-- Simulation duration: 1800 s
+- Long-horizon simulation duration: 7700 s
+- Wall-clock validation duration: 800 s
 - Logged sample interval: 0.5 s
-- Fault injection time: 600 s
+- Fault injection time: 350 s
 - Safety threshold: 120 C model limit
 - Thermal risk threshold: 100 C model threshold
 - FMU interface: FMI 2.0 co-simulation
 - Snapshot timing: Option A (AAS snapshot built before the FMU step using same-step measurement and estimate)
+
+### Wall-clock validation protocol
+
+- Matrix: 7 scenarios x 3 controllers = 21 runs
+- Control deadline: 500 ms per cycle
+- Wall-clock deadline misses: 0 across all 21 runs
+- Maximum P95 cycle latency: approximately 1.04 ms
+- Minimum mean deadline headroom: approximately 499.29 ms
+- Mean fault-detection latency: approximately 0.019 ms in wall-clock runs
+- Interpretation: soft real-time evidence for the tested software/FMU environment; not hardware real-time certification
 
 ### Scenario matrix
 
@@ -74,9 +86,18 @@ The repository did not expose a Git commit hash in the currently checked-out wor
 
 ## Final frozen scientific results
 
-The current evidence table is in `results/compare.csv`.
+The current long-horizon evidence table is in `results/analysis_results.csv`. The derived simulation-versus-wall-clock summary is in `results/realtime_vs_simulation_summary.csv`.
 
-The leading values for the retained constrained controller are:
+The long-horizon constrained-controller results are scenario-dependent. Cooling degradation reaches approximately 122.54 C and the combined scenario approximately 122.48 C, exceeding the 120 C model threshold. Therefore, the constrained controller is not claimed to guarantee the threshold over the full 7700-s horizon.
+
+The wall-clock validation results are:
+
+- 21/21 runs completed
+- 0 missed 500-ms deadlines
+- maximum P95 cycle latency approximately 1.04 ms
+- minimum mean deadline headroom approximately 499.29 ms
+
+The constrained-controller values in the long-horizon matrix include:
 
 - combined scenario max winding temperature: 99.66 C
 - combined scenario minimum safety margin: 18.24 C

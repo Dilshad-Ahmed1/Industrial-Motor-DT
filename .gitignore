@@ -4,9 +4,7 @@ __pycache__/
 *.log
 *.mat
 *.fmu
-results/*.csv
-results/*.png
-results/*.json
+results/
 Manuscript/
 docs/
 .pytest_cache/
