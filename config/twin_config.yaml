@@ -105,3 +105,39 @@ simulation:
   default_load_pu: 1.00
   default_speed_pu: 1.00
   default_cooling_flow_pu: 1.00
+
+induction_motor_digital_twin:
+  reference_source: "Modelica Standard Library 4.1.0 IMC_withLosses"
+  rated_output_W: 18500.0
+  rated_voltage_line_line_V: 400.0
+  rated_current_A: 32.85
+  rated_efficiency: 0.9049
+  rated_speed_rpm: 1462.5
+  rated_torque_Nm: 120.794521
+  frequency_Hz: 50.0
+  ambient_temperature_C: 20.0
+  winding_frame_Rth_K_per_W: 0.010
+  frame_ambient_Rth_K_per_W: 0.0296652
+  winding_thermal_capacitance_J_per_K: 15000.0
+  frame_thermal_capacitance_J_per_K: 35000.0
+  initial_winding_C: 90.0
+  initial_frame_C: 77.4827
+  winding_loss_fraction: 0.644
+  fixed_loss_fraction: 0.356
+  cooling_flow_offset: 0.0
+  cooling_flow_gain: 1.0
+  cooling_residual_threshold_C: 0.02
+  cooling_residual_clear_C: 0.015
+  cooling_severity_scale_C: 0.10
+  safety:
+    winding_warning_C: 100.0
+    winding_critical_C: 120.0
+    minimum_load_pu: 0.50
+    reference_load_pu: 1.00
+  provenance:
+    manufacturer_identified: false
+    winding_frame_resistance: "Explicit lumped model assumption"
+    frame_ambient_resistance: "Calculated from MSL nominal loss and 90 C reference winding temperature; 20 C ambient; assumed winding-frame resistance"
+    winding_and_frame_capacitance: "Explicit lumped model assumptions"
+    winding_loss_fraction: "Calculated from MSL nominal stator and rotor copper loss divided by MSL total loss"
+    safety_limits: "Inherited Digital Twin controller envelope; not verified thermal limits for this unidentified motor"

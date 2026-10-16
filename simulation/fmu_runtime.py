@@ -15,11 +15,20 @@ INPUTS = [
     "u_load_torque_pu",
     "u_speed_pu",
     "u_cooling_flow_pu",
+]
+
+OPTIONAL_INPUTS = [
     "f_sensor_bias_C",
     "f_sensor_freeze",
     "f_cooling_eff",
     "f_rth_degradation",
     "f_unbalance_severity",
+    "u_ambient_C",
+    "f_load_overload_pu",
+    "f_mechanical_friction_factor",
+    "f_voltage_unbalance_pu",
+    "f_supply_voltage_degradation_pu",
+    "f_supply_frequency_deviation_pu",
 ]
 
 OUTPUTS = [
@@ -38,6 +47,43 @@ OUTPUTS = [
     "thermal_margin_to_critical_K",
     "thermal_state",
 ]
+
+OPTIONAL_OUTPUTS = [
+    "T_winding_K",
+    "T_frame_K",
+    "T_ambient_K",
+    "T_ambient_C",
+    "P_motor_losses_W",
+    "P_winding_losses_W",
+    "P_fixed_losses_W",
+    "current_pu",
+    "load_torque_pu",
+    "power_factor",
+    "reactive_power_var",
+    "supply_frequency_Hz",
+    "line_voltage_rms_V",
+    "voltage_unbalance_percent",
+    "cooling_effectiveness",
+    "mechanical_unbalance_supported",
+]
+
+_OPTIONAL_INPUT_DEFAULTS: dict[str, Any] = {
+    "f_sensor_bias_C": 0.0,
+    "f_sensor_freeze": False,
+    "f_cooling_eff": 1.0,
+    "f_rth_degradation": 1.0,
+    "f_unbalance_severity": 0.0,
+    "u_ambient_C": 20.0,
+    "f_load_overload_pu": 0.0,
+    "f_mechanical_friction_factor": 1.0,
+    "f_voltage_unbalance_pu": 0.0,
+    "f_supply_voltage_degradation_pu": 0.0,
+    "f_supply_frequency_deviation_pu": 0.0,
+}
+
+# OpenModelica 1.27.1's exported CVODE FMU fails above this interval during
+# the load transient; larger Digital Twin cycles are subdivided.
+_INDUCTION_MAX_COMMUNICATION_STEP_S = 0.1
 
 
 class FMURuntime:
@@ -61,8 +107,21 @@ class FMURuntime:
         if missing:
             raise KeyError(f"FMU variables not found: {missing}")
 
-        self.in_var = {n: by_name[n] for n in INPUTS}
-        self.out_var = {n: by_name[n] for n in OUTPUTS}
+        self.in_var = {
+            n: by_name[n]
+            for n in INPUTS + OPTIONAL_INPUTS
+            if n in by_name
+        }
+        self.out_var = {
+            n: by_name[n]
+            for n in OUTPUTS + OPTIONAL_OUTPUTS
+            if n in by_name
+        }
+        self.plant_profile = (
+            "induction"
+            if "InductionMotorDigitalTwin18kW" in self.md.modelName
+            else "legacy"
+        )
 
         self.in_vr = {n: v.valueReference for n, v in self.in_var.items()}
         self.out_vr = {n: v.valueReference for n, v in self.out_var.items()}
@@ -91,11 +150,7 @@ class FMURuntime:
             "u_load_torque_pu": 1.0,
             "u_speed_pu": 1.0,
             "u_cooling_flow_pu": 1.0,
-            "f_sensor_bias_C": 0.0,
-            "f_sensor_freeze": False,
-            "f_cooling_eff": 1.0,
-            "f_rth_degradation": 1.0,
-            "f_unbalance_severity": 0.0,
+            **_OPTIONAL_INPUT_DEFAULTS,
         }
         if inputs:
             initial.update(inputs)
@@ -111,6 +166,25 @@ class FMURuntime:
 
     def set_inputs(self, inputs: dict[str, Any]) -> None:
         """Set inputs using the FMI primitive matching their declared type."""
+        unknown = sorted(
+            set(inputs) - set(INPUTS) - set(OPTIONAL_INPUTS)
+        )
+        if unknown:
+            raise KeyError(f"Unknown FMU inputs: {unknown}")
+
+        unsupported = {
+            name: value
+            for name, value in inputs.items()
+            if name in OPTIONAL_INPUTS
+            and name not in self.in_var
+            and value != _OPTIONAL_INPUT_DEFAULTS[name]
+        }
+        if unsupported:
+            raise ValueError(
+                "Active plant inputs are unsupported by this FMU: "
+                f"{unsupported}"
+            )
+
         real_vr: list[int] = []
         real_val: list[float] = []
         int_vr: list[int] = []
@@ -150,7 +224,9 @@ class FMURuntime:
         int_names, int_vr = [], []
         bool_names, bool_vr = [], []
 
-        for name in OUTPUTS:
+        for name in OUTPUTS + OPTIONAL_OUTPUTS:
+            if name not in self.out_var:
+                continue
             kind = self._kind(self.out_var[name])
             vr = self.out_vr[name]
             if kind == "real":
@@ -182,7 +258,11 @@ class FMURuntime:
             for name, val in zip(bool_names, vals):
                 result[name] = float(1.0 if val else 0.0)
 
-        return {name: result[name] for name in OUTPUTS}
+        return result
+
+    def supports_input(self, name: str) -> bool:
+        """Whether this FMU declares an optional or required input."""
+        return name in self.in_var
 
     def step(
         self,
@@ -199,16 +279,30 @@ class FMURuntime:
             self.set_inputs(inputs)
 
         t0 = time.perf_counter()
-        status = self.fmu.doStep(
-            currentCommunicationPoint=self.current_time,
-            communicationStepSize=step_size,
+        end_time = self.current_time + step_size
+        max_step_size = (
+            _INDUCTION_MAX_COMMUNICATION_STEP_S
+            if self.plant_profile == "induction"
+            else step_size
         )
+        while self.current_time < end_time - 1e-12:
+            communication_step = min(
+                max_step_size,
+                end_time - self.current_time,
+            )
+            status = self.fmu.doStep(
+                currentCommunicationPoint=self.current_time,
+                communicationStepSize=communication_step,
+            )
+            if status not in (None, 0):
+                raise RuntimeError(
+                    "FMU doStep returned non-success status "
+                    f"{status} at t={self.current_time:g}s "
+                    f"for {communication_step:g}s step."
+                )
+            self.current_time += communication_step
         elapsed = time.perf_counter() - t0
 
-        if status not in (None, 0):
-            raise RuntimeError(f"FMU doStep returned non-success status: {status}")
-
-        self.current_time += step_size
         return self.get_outputs(), elapsed
 
     def close(self) -> None:

@@ -1,0 +1,250 @@
+Work on my existing Industry 5.0 Digital Twin repository.
+
+First inspect the repository completely before modifying anything. Understand the current:
+- Modelica motor model
+- FMU export/runtime
+- Python simulation loop
+- fault framework
+- state estimator
+- thermal prediction
+- baseline/adaptive/constrained controllers
+- evaluation scripts
+- tests
+- BaSyx/AAS integration
+
+IMPORTANT:
+Do NOT delete or overwrite the existing working model or results. Keep the current MotorElectroThermalMechanicalFaultable.mo as a reference/fallback.
+
+I want to introduce a more physically grounded induction-motor plant using the Modelica Standard Library model:
+
+Modelica.Electrical.Machines.BasicMachines.InductionMachines.IM_SquirrelCage
+
+Create a new model separately, using composition/wrapping rather than modifying Modelica Standard Library source code.
+
+The goal is a genuine three-phase squirrel-cage induction motor model containing:
+- electrical dynamics
+- electromagnetic torque behaviour
+- mechanical dynamics
+- losses
+- thermal coupling
+
+We are no longer required to use the WEG 5.5 kW motor. Select a well-documented industrial motor rating for which the required induction-machine parameters can be obtained or defensibly derived. Prefer a 400 V, 50 Hz, approximately 5–7.5 kW, 4-pole motor if a credible parameter set is available.
+
+CRITICAL:
+Do NOT invent machine parameters silently.
+
+For every parameter, document whether it is:
+1. manufacturer data,
+2. literature/reference data,
+3. calculated from documented values, or
+4. an explicit assumption/identified parameter.
+
+First make the standard induction-motor model run stably in OpenModelica 1.27.1.
+
+Then create a nominal validation experiment checking:
+- voltage
+- current
+- frequency
+- speed
+- slip
+- electromagnetic torque
+- shaft torque
+- electrical input power
+- mechanical output power
+- efficiency
+- power factor where available
+- losses
+
+Calculate deviations from the selected reference operating point.
+
+Do NOT implement the new faults/controller changes yet.
+
+At the end:
+1. run the Modelica simulation,
+2. run the nominal validation,
+3. run relevant tests,
+4. document the selected motor and all parameters,
+5. report exactly which files were created/changed,
+6. report any parameters or physical information that could not be verified.
+
+If the standard model cannot be credibly parameterized, STOP and explain the problem instead of inventing values.
+
+Do not modify the existing controller, AAS, or evaluation results in this stage.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Continue from the validated standard induction-motor model you just created.
+
+Now integrate it into the existing Digital Twin architecture without destroying the existing implementation.
+
+The new plant must retain:
+- electrical dynamics
+- electromagnetic torque
+- mechanical dynamics
+- motor losses
+
+Add a physically meaningful thermal subsystem using the motor losses and the available thermal interface. It should expose:
+- winding temperature
+- frame temperature
+- ambient temperature
+- thermal margin
+- cooling effectiveness
+
+Then add a modular fault/degradation layer supporting, where physically appropriate:
+- cooling degradation
+- temperature-sensor bias
+- sensor freeze
+- increased load/overload
+- increased mechanical friction
+- voltage imbalance or supply degradation
+- frequency deviation
+- mechanical unbalance if the model supports it
+
+Do NOT create arbitrary fault equations just to produce desired results. Each fault must have a clear physical mechanism and documented affected variables.
+
+Adapt the existing FMU/Python interface so the new plant can be used by the existing closed-loop framework.
+
+Then adapt the existing:
+- state estimation
+- fault/severity estimation
+- 30 s and 60 s temperature prediction
+- baseline controller
+- adaptive controller
+- constrained controller
+
+Do not redesign the controllers unnecessarily. Preserve their existing safety logic and interfaces where possible.
+
+Important distinction:
+Keep true simulation variables separate from estimated Digital Twin variables. Never use future plant values inside the estimator or prediction.
+
+Add tests for:
+- nominal operation
+- fault activation
+- estimator operation
+- controller response
+- no NaN/Inf
+- physically valid power/temperature/speed
+
+Run the relevant tests and at least one end-to-end FMU/Python experiment.
+
+Do not modify or delete the old model/results. At the end, report what changed and any remaining issues.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Now complete the integration of the new standard induction-motor Digital Twin.
+
+Preserve the existing Eclipse BaSyx/AAS architecture and update it for the richer motor model.
+
+Maintain/update these AAS submodels:
+- OperationalState
+- ElectricalState
+- MechanicalState
+- ThermalState
+- FaultState
+- ControlInterface
+
+Expose meaningful variables such as:
+Electrical: voltage, current, power, power factor, frequency
+Mechanical: speed, slip, torque, load
+Thermal: winding temperature, frame temperature, thermal margin, predicted temperature
+Fault: fault type, true/estimated severity, active state
+Control: load/cooling command, operating mode
+
+Make sure AAS timestamps/snapshots correspond to the same simulation instant as the values being synchronized.
+
+Extend the existing experiment framework.
+
+For the new plant, support scenarios such as:
+- healthy
+- cooling degradation
+- sensor bias
+- sensor freeze
+- voltage imbalance
+- frequency deviation
+- overload
+- increased friction
+- mechanical unbalance if supported
+- selected combined faults
+
+Use:
+0–350 s = healthy operation
+t = 350 s = fault injection
+350–800 s = faulted operation
+
+Run baseline, adaptive and constrained controllers where applicable.
+
+Evaluate:
+- maximum winding temperature
+- time above thermal limits
+- minimum thermal margin
+- state-estimation MAE
+- fault detection latency
+- true vs estimated fault severity
+- 30/60 s prediction MAE
+- electrical energy
+- useful mechanical work
+- energy/useful-work ratio
+- load derating
+- speed/torque error
+- AAS read/write latency
+- synchronization success
+- end-to-end latency
+- real-time factor
+
+Do not fabricate results. Only report results from experiments that actually ran.
+
+Finally create a comparison between:
+1. the existing reduced-order motor model
+2. the new standard induction-motor model
+
+Compare physical behaviour, fault response, computational cost and real-time feasibility.
+
+Keep the old implementation intact as a fallback/reference.
+
+Update README/documentation with:
+- architecture
+- motor parameters and sources
+- assumptions
+- fault definitions
+- experiment commands
+- validation methodology
+- limitations
+
+Run the complete test suite and report:
+- files changed
+- tests passed/failed
+- experiments completed
+- remaining limitations
+- exact commands required to reproduce the final setup.
