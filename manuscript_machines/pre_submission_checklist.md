@@ -20,13 +20,14 @@
 - [x] Descriptive methods avoid internal repository file-name dependencies; reproducibility commands remain in the dedicated methods subsection
 - [x] Four result figures copied from the final campaign; architecture diagram is rendered from source
 - [x] Revised LaTeX compiles to a 12-page PDF; references resolve and no overfull boxes are reported in the final log
-- [x] Current source ZIP rebuilt with the MDPI class/support files and all four result figures
-- [ ] Exact evaluated source state, configuration, raw campaign data, environment record, and figure-generation materials archived or made available under an approved access arrangement
-- [ ] Update Data Availability and Supplementary Materials once archive/access is decided
+- [x] Source ZIP (including separate cover-letter draft) was compiled successfully from a clean extracted folder
+- [x] Evaluated source/configuration state linked to pushed commit 74a5fb3015bb9055cb81499e7676e1479d003104; Modelica/configuration hashes match campaign manifest
+- [x] Data Availability and Supplementary Materials disclose that raw per-run traces are not public and may be requested from the corresponding author
+- [ ] Corresponding author confirms the raw-data request/access statement is acceptable for submission
 - [ ] Rebuild PDF and source ZIP if author confirmation results in further edits
 - [ ] Resolve template-generated DOI through MDPI submission workflow; do not use as an assigned DOI
 
 ## Readiness
 - [x] Suitable for final author review
-- [ ] Submission package fully ready
+- [ ] Submission package fully ready pending co-author confirmation of revised version and data-access statement
 - [ ] Submitted to journal (not submitted)

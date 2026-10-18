@@ -1,6 +1,6 @@
 # Cover letter draft
 
-**Draft for use only after both authors confirm this revised version and the exact source/data archive has been prepared.**
+**Draft for use only after both authors confirm this revised version and approve the Data Availability Statement.**
 
 Dear Editor,
 
@@ -10,9 +10,9 @@ The manuscript reports a simulation-based workflow that composes the Modelica St
 
 The paper is framed as an engineering integration and simulation-evaluation study, not as a new diagnostic/control algorithm or a physically validated motor digital twin. The manuscript distinguishes the MSL reference-point check from hardware validation, documents thermal/fault assumptions, reports the controllers’ unequal signal access, and avoids interpreting deterministic scenario averages as statistical generalization. It also makes clear that the AAS measurements are a local smoke test and do not establish industrial deployment or real-time performance.
 
-We consider the subject matter relevant to *Machines* because it brings together induction-machine simulation, thermal estimation, fault-informed supervisory control, FMI-based co-simulation, and AAS data representation. The exact campaign source state and raw result traces must be placed in a versioned reproducibility archive before submission; the current local campaign manifest records a non-clean source tree.
+We consider the subject matter relevant to *Machines* because it brings together induction-machine simulation, thermal estimation, fault-informed supervisory control, FMI-based co-simulation, and AAS data representation. The evaluated source and configuration are now available at a versioned project commit. Raw per-run campaign traces are not included in the public repository; the manuscript directs readers to contact the corresponding author to request access.
 
-The project repository is available at https://github.com/Dilshad-Ahmed1/Industrial-Motor-DT. The manuscript's Data Availability Statement explains that the exact source state and campaign traces are not yet archived at that link.
+The project repository is available at https://github.com/Dilshad-Ahmed1/Industrial-Motor-DT, with the evaluated source revision at https://github.com/Dilshad-Ahmed1/Industrial-Motor-DT/commit/74a5fb3015bb9055cb81499e7676e1479d003104.
 
 The corresponding author is Dilshad Ahmed, Department of Computer Science and Engineering, R.V. College of Engineering, Bengaluru, India (dilshadahmed.cs23@rvce.edu.in). Co-author Sridhar R is an Associate Professor in the Department of Mechanical Engineering at the same institution.
 

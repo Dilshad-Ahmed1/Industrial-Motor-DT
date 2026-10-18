@@ -1,0 +1,262 @@
+{
+  "generated_at_utc": "2026-10-16T17:01:22.562767+00:00",
+  "model_file": "C:\\Users\\dilsh\\Documents\\Industry 5.0\\models\\InductionMotorSquirrelCage18kW.mo",
+  "model_class": "MotorDigitalTwin.InductionMotorSquirrelCage18kW",
+  "openmodelica_version": "OpenModelica v1.27.1 (64-bit)",
+  "modelica_standard_library_version": "4.1.0",
+  "stop_time_s": 8.0,
+  "settling_window_s": 1.0,
+  "reference_source": "Modelica Standard Library 4.1.0, Modelica.Electrical.Machines.Examples.InductionMachines.IMC_withLosses",
+  "result_csv": "C:\\Users\\dilsh\\Documents\\Industry 5.0\\results\\induction_motor_nominal\\run_4bi7i2re\\motor_nominal.csv",
+  "passed": true,
+  "steady_state_window_s": {
+    "start": 7.0,
+    "stop": 8.0,
+    "samples": 1002
+  },
+  "operating_point": {
+    "line_voltage_rms_V": 399.9999999999999,
+    "line_current_rms_A": 32.856502818804266,
+    "supply_frequency_Hz": 50.0,
+    "speed_rpm": 1462.8938130303713,
+    "slip_percent": 2.47374579797524,
+    "electromagnetic_torque_Nm": 122.63811854359948,
+    "shaft_torque_Nm": 120.79451547341257,
+    "electrical_input_power_W": 20444.309853276285,
+    "mechanical_output_power_W": 18504.980733567954,
+    "efficiency_percent": 90.51408859685269,
+    "power_factor": 0.8981120010162854,
+    "motor_losses_W": 1939.3301384113124,
+    "stator_copper_losses_W": 770.3851413753085,
+    "stator_core_losses_W": 409.97430754706596,
+    "rotor_copper_losses_W": 476.541145575639,
+    "rotor_core_losses_W": 0.0,
+    "stray_load_losses_W": 102.28409686709998,
+    "friction_losses_W": 180.14544704619908,
+    "motor_lumped_temperature_C": 89.97861826550906
+  },
+  "reference_point": {
+    "line_voltage_rms_V": 400.0,
+    "line_current_rms_A": 32.85,
+    "supply_frequency_Hz": 50.0,
+    "speed_rpm": 1462.5,
+    "slip_percent": 2.5,
+    "shaft_torque_Nm": 120.79452091077184,
+    "electrical_input_power_W": 20443.95,
+    "mechanical_output_power_W": 18500.0,
+    "efficiency_percent": 90.49,
+    "power_factor": 0.898,
+    "motor_losses_W": 1943.95,
+    "stator_copper_losses_W": 770.13,
+    "stator_core_losses_W": 410.0,
+    "rotor_copper_losses_W": 481.6,
+    "rotor_core_losses_W": 0.0,
+    "stray_load_losses_W": 102.22,
+    "friction_losses_W": 180.0,
+    "motor_lumped_temperature_C": 90.0,
+    "electromagnetic_torque_Nm": 122.63725765084956
+  },
+  "deviation_checks": {
+    "line_voltage_rms_V": {
+      "actual": 399.9999999999999,
+      "reference": 400.0,
+      "absolute_deviation": -1.1368683772161603e-13,
+      "relative_deviation_percent": 2.842170943040401e-14,
+      "tolerance": 0.4,
+      "tolerance_type": "absolute",
+      "passed": true
+    },
+    "line_current_rms_A": {
+      "actual": 32.856502818804266,
+      "reference": 32.85,
+      "absolute_deviation": 0.006502818804264621,
+      "relative_deviation_percent": 0.01979549103276901,
+      "tolerance": 2.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "supply_frequency_Hz": {
+      "actual": 50.0,
+      "reference": 50.0,
+      "absolute_deviation": 0.0,
+      "relative_deviation_percent": 0.0,
+      "tolerance": 0.001,
+      "tolerance_type": "absolute",
+      "passed": true
+    },
+    "speed_rpm": {
+      "actual": 1462.8938130303713,
+      "reference": 1462.5,
+      "absolute_deviation": 0.39381303037134785,
+      "relative_deviation_percent": 0.026927386692057974,
+      "tolerance": 0.5,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "slip_percent": {
+      "actual": 2.47374579797524,
+      "reference": 2.5,
+      "absolute_deviation": -0.02625420202475981,
+      "relative_deviation_percent": 1.0501680809903924,
+      "tolerance": 0.1,
+      "tolerance_type": "absolute",
+      "passed": true
+    },
+    "electromagnetic_torque_Nm": {
+      "actual": 122.63811854359948,
+      "reference": 122.63725765084956,
+      "absolute_deviation": 0.000860892749912523,
+      "relative_deviation_percent": 0.0007019830403934014,
+      "tolerance": 2.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "shaft_torque_Nm": {
+      "actual": 120.79451547341257,
+      "reference": 120.79452091077184,
+      "absolute_deviation": -5.437359263282815e-06,
+      "relative_deviation_percent": 4.501329383390881e-06,
+      "tolerance": 2.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "electrical_input_power_W": {
+      "actual": 20444.309853276285,
+      "reference": 20443.95,
+      "absolute_deviation": 0.35985327628441155,
+      "relative_deviation_percent": 0.0017601944647898842,
+      "tolerance": 2.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "mechanical_output_power_W": {
+      "actual": 18504.980733567954,
+      "reference": 18500.0,
+      "absolute_deviation": 4.980733567954303,
+      "relative_deviation_percent": 0.02692288415110434,
+      "tolerance": 2.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "efficiency_percent": {
+      "actual": 90.51408859685269,
+      "reference": 90.49,
+      "absolute_deviation": 0.02408859685269249,
+      "relative_deviation_percent": 0.026620175547234493,
+      "tolerance": 0.5,
+      "tolerance_type": "absolute",
+      "passed": true
+    },
+    "power_factor": {
+      "actual": 0.8981120010162854,
+      "reference": 0.898,
+      "absolute_deviation": 0.00011200101628539016,
+      "relative_deviation_percent": 0.012472273528439885,
+      "tolerance": 0.02,
+      "tolerance_type": "absolute",
+      "passed": true
+    },
+    "motor_losses_W": {
+      "actual": 1939.3301384113124,
+      "reference": 1943.95,
+      "absolute_deviation": -4.619861588687627,
+      "relative_deviation_percent": 0.23765331354652264,
+      "tolerance": 5.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "stator_copper_losses_W": {
+      "actual": 770.3851413753085,
+      "reference": 770.13,
+      "absolute_deviation": 0.25514137530853986,
+      "relative_deviation_percent": 0.03312965022899249,
+      "tolerance": 3.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "stator_core_losses_W": {
+      "actual": 409.97430754706596,
+      "reference": 410.0,
+      "absolute_deviation": -0.0256924529340381,
+      "relative_deviation_percent": 0.006266451935131244,
+      "tolerance": 3.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "rotor_copper_losses_W": {
+      "actual": 476.541145575639,
+      "reference": 481.6,
+      "absolute_deviation": -5.058854424361016,
+      "relative_deviation_percent": 1.05042658313144,
+      "tolerance": 3.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "rotor_core_losses_W": {
+      "actual": 0.0,
+      "reference": 0.0,
+      "absolute_deviation": 0.0,
+      "relative_deviation_percent": null,
+      "tolerance": 0.1,
+      "tolerance_type": "absolute",
+      "passed": true
+    },
+    "stray_load_losses_W": {
+      "actual": 102.28409686709998,
+      "reference": 102.22,
+      "absolute_deviation": 0.06409686709997686,
+      "relative_deviation_percent": 0.06270482009389246,
+      "tolerance": 3.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "friction_losses_W": {
+      "actual": 180.14544704619908,
+      "reference": 180.0,
+      "absolute_deviation": 0.1454470461990809,
+      "relative_deviation_percent": 0.08080391455504495,
+      "tolerance": 3.0,
+      "tolerance_type": "relative_percent",
+      "passed": true
+    },
+    "motor_lumped_temperature_C": {
+      "actual": 89.97861826550906,
+      "reference": 90.0,
+      "absolute_deviation": -0.021381734490944382,
+      "relative_deviation_percent": 0.02375748276771598,
+      "tolerance": 5.0,
+      "tolerance_type": "absolute",
+      "passed": true
+    }
+  },
+  "stability_checks": {
+    "speed_rpm_peak_to_peak": {
+      "actual": 0.0008926152829644707,
+      "maximum": 0.1,
+      "passed": true
+    },
+    "line_current_rms_A_peak_to_peak": {
+      "actual": 0.0006345427105287627,
+      "maximum": 0.02,
+      "passed": true
+    },
+    "electrical_input_power_W_peak_to_peak": {
+      "actual": 0.4351071768105612,
+      "maximum": 20.0,
+      "passed": true
+    },
+    "mechanical_output_power_W_peak_to_peak": {
+      "actual": 0.1919669051094388,
+      "maximum": 20.0,
+      "passed": true
+    }
+  },
+  "thermal_response": {
+    "initial_temperature_C": 90.0,
+    "final_temperature_C": 89.9786403151864,
+    "minimum_temperature_C": 89.9783369241091,
+    "maximum_temperature_C": 90.0,
+    "temperature_range_C": 0.02166307589089911,
+    "changed_during_simulation": true
+  }
+}

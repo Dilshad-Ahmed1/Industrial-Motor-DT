@@ -6,7 +6,7 @@ The revised LaTeX package is being prepared for author confirmation and possible
 
 The manuscript now includes a colored, structured workflow diagram; two additional campaign figures; a link to the project's GitHub repository; and prose that describes the scientific methods without relying on internal source-file names. Exact commands remain in the reproducibility subsection because they are operationally necessary to reproduce the software workflow.
 
-The work is still a deterministic simulation study, not physical motor validation. The public GitHub repository is linked, but it does not currently archive the exact campaign source state and raw data. Do not claim complete reproducibility or submit before an archive or an author-approved access arrangement is prepared.
+The work is still a deterministic simulation study, not physical motor validation. The public GitHub commit now captures the changed source/configuration state recorded as dirty in the original campaign manifest. The raw per-run campaign traces are not in the public repository; the manuscript states that they are available from the corresponding author upon reasonable request. Reproducibility is therefore source-versioned but not fully self-contained from the public repository.
 
 ## Evidence inspected
 
@@ -52,19 +52,19 @@ All campaign averages are deterministic scenario averages, not statistical estim
 
 ## Build, figures, and package
 
-- LaTeX build after the requested content/figure changes succeeded: 12-page A4 PDF. Citation/reference resolution passed; no overfull boxes were reported in the final build log.
+- LaTeX build after the requested content/figure/data-statement changes succeeded: 12-page A4 PDF. Citation/reference resolution passed; no overfull boxes were reported in the final build log.
 - Four campaign figures are included: cooling temperature, voltage-imbalance temperature, cooling load commands, and scenario forecast MAE. The architecture diagram is drawn in the LaTeX source.
 - Existing test suite: 22 passed in the preceding validation run; manuscript-only revisions do not change application source code.
 - MDPI's class generates a default template DOI (`10.3390/machines1010000`) in the submission PDF. It is not an assigned DOI and must not be treated as one.
-- The current ZIP was rebuilt from the revised LaTeX source, MDPI support files, four figures, and figure-generation note. Rebuild after further source edits.
+- The current ZIP was rebuilt from the revised LaTeX source, MDPI support files, four figures, figure-generation note, and cover letter. The ZIP was extracted into a clean temporary folder and compiled successfully. Rebuild after further source edits.
 
 ## Remaining conditions before submission
 
 1. Both authors should confirm the revised manuscript and the updated authorship/GenAI statements.
 2. Review full texts and confirm citations and literature framing.
-3. Archive the exact source delta, configuration, raw campaign traces, environment record, and figure-generation materials, or agree on a clear author-approved access arrangement. The recorded campaign commit has a non-clean working tree and is insufficient by itself.
-4. Update Data Availability and Supplementary Materials against the actual archive or access arrangement.
-5. After the authors confirm this revised version and resolve the data archive, inspect/rebuild the final PDF and source ZIP if any changes are needed.
+3. Confirm that the linked GitHub commit is the intended source snapshot. It captures the working-tree changes recorded in the campaign manifest and the Modelica/configuration hashes match.
+4. Raw campaign traces remain outside the public repository. The corresponding author should confirm the stated request-access route or publish a stable data archive.
+5. After the authors confirm this revised version and data-access statement, inspect/rebuild the final PDF and source ZIP if any changes are needed.
 6. Resolve the MDPI template DOI through the journal workflow without inventing an identifier.
 
-No journal submission has been made. This audit does not assert that an archive, DOI, final co-author approval of the revised version, or public release of exact campaign data exists.
+No journal submission has been made. This audit does not assert that a data archive, DOI, or final co-author approval of this revised version exists.

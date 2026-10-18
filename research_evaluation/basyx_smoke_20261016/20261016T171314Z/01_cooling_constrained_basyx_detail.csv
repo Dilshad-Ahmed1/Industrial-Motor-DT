@@ -1,0 +1,2 @@
+controller_only_latency_ms,cooling_command_pu_absolute_error,end_to_end_loop_latency_ms,error,fault_severity_absolute_error,frame_temperature_C_absolute_error,load_command_pu_absolute_error,read_latency_ms,simulation_time_s,snapshot_alignment_success,thermal_margin_C_absolute_error,update_success,winding_temperature_C_absolute_error,write_latency_ms
+0.1796999858925119,0.0,2403.913800008013,,4.5191869107848714e-27,0.0,0.0,146.0394250001021,0.0,True,0.0,True,0.0,646.2196000065887
