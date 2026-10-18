@@ -26,13 +26,6 @@ def estimate_fault_severity(
     Ground-truth FMU fault parameters are never used.
     """
 
-    vibration = float(
-        measurement.get(
-            "vibration_mm_s_out",
-            1.0,
-        )
-    )
-
     # -------------------------------------------------------------
     # Sensor bias severity
     #
@@ -76,22 +69,6 @@ def estimate_fault_severity(
     cooling_severity = max(
         cooling_from_innovation,
         0.5 * cooling_from_rate,
-    )
-
-    # -------------------------------------------------------------
-    # Mechanical unbalance severity
-    #
-    # Healthy vibration = approximately 1 mm/s.
-    # At nominal load, severity 0.75 produces approximately 4 mm/s.
-    # -------------------------------------------------------------
-
-    unbalance_supported = bool(
-        measurement.get("mechanical_unbalance_supported", True)
-    )
-    unbalance_severity = (
-        _clip01(max(0.0, vibration - 1.0) / 4.0)
-        if unbalance_supported
-        else 0.0
     )
 
     overload_severity = _clip01(
@@ -177,14 +154,10 @@ def estimate_fault_severity(
     if not detection.cooling_degradation:
         cooling_severity *= 0.50
 
-    if not detection.mechanical_unbalance:
-        unbalance_severity *= 0.50
-
     overall = max(
         sensor_severity,
         freeze_severity,
         cooling_degradation_severity,
-        unbalance_severity,
         overload_severity,
         friction_severity,
         supply_severity,
@@ -199,10 +172,6 @@ def estimate_fault_severity(
 
         "cooling_degradation": _clip01(
             cooling_degradation_severity
-        ),
-
-        "mechanical_unbalance": _clip01(
-            unbalance_severity
         ),
 
         "sensor_freeze": _clip01(freeze_severity),

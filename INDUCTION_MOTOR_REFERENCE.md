@@ -2,15 +2,16 @@
 
 ## Scope and preservation
 
-`models/InductionMotorSquirrelCage18kW.mo` is the standalone validation plant;
-`models/InductionMotorDigitalTwin18kW.mo` is its separate FMU-facing Digital
-Twin integration. Both compose the unmodified
+`models/InductionMotorSquirrelCage18kW.mo` is the nominal-validation
+test fixture. `models/InductionMotorDigitalTwin18kW.mo` is the sole supported
+FMU/runtime plant. Both use the same documented machine parameterization and
+compose the unmodified
 `Modelica.Electrical.Machines.BasicMachines.InductionMachines.IM_SquirrelCage`
-from Modelica Standard Library (MSL) 4.1.0. It does not replace the reduced
-order plant or alter its existing FMU/results. The integration adds a
-profile-specific runtime contract, estimator inputs, fault scenarios and
-controller configuration; it retains the existing controllers and AAS
-submodel schema.
+from Modelica Standard Library (MSL) 4.1.0. The validation fixture is not an
+alternative runtime profile. The integration adds the winding/frame thermal
+network, FMU contract, estimator inputs, supported fault scenarios, and
+controller configuration; it retains the existing controller and AAS
+submodel architecture.
 
 The selected benchmark is the MSL `IMC_withLosses` example. MSL describes its
 machine as a *standard 18.5 kW, 400 V, 50 Hz motor* and states that simulation
@@ -130,7 +131,7 @@ or ambient condition is available from this source.
 electromagnetic, rotational, and loss models, and splits the thermal coupling
 into winding and frame masses. Its corresponding isolated FMI 2.0 Co-Simulation
 FMU is exported by `scripts/export_induction_fmu.py`; use the
-`induction_motor_digital_twin` profile in `config/twin_config.yaml`.
+`induction_motor_digital_twin` section in `config/twin_config.yaml`.
 
 | Integration parameter | Value | Provenance |
 |---|---:|---|
@@ -208,16 +209,14 @@ For the Digital Twin FMU and closed-loop runtime:
 .\.venv\Scripts\python.exe -m experiments.experiment_runner `
   --fmu models\InductionMotorDigitalTwin18kW.fmu `
   --scenario cooling --controller constrained `
-  --stop 1800 --step 0.5 --fault-time 600 `
+  --stop 2700 --step 0.5 --fault-time 350 `
   --output $env:TEMP\induction_motor_cooling.csv
 ```
 
-The integration FMU passed `checkModel` and FMI 2.0 Co-Simulation export.
-The 1800 s FMU/Python test completed with a 0.5 s controller cycle, 2.0 s
-cooling-fault detection latency, no non-finite numeric log channels, and
-finite 30 s/60 s prediction errors. It also activated constrained-controller
-derating. Its output was written outside the repository; it did not replace
-prior evaluation results.
+The exporter verifies OpenModelica 1.27.1, MSL 4.1.0, `checkModel`, the FMI 2.0
+Co-Simulation type, and required plant outputs. The per-run validation JSON
+and final campaign manifest record the measured result of each actual run;
+no previous output value is treated as a result for a later source revision.
 
 ## References
 

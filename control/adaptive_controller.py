@@ -136,21 +136,6 @@ class FaultAwareAdaptiveController:
             0.12 * cooling_severity
         )
 
-        # -------------------------------------------------------------
-        # 4. Mechanical unbalance penalty
-        # -------------------------------------------------------------
-
-        unbalance_severity = (
-            severity.get(
-                "mechanical_unbalance",
-                0.0,
-            )
-        )
-
-        unbalance_penalty = (
-            0.08 * unbalance_severity
-        )
-
         electrical_mechanical_severity = max(
             severity.get("load_overload", 0.0),
             severity.get("mechanical_friction", 0.0),
@@ -195,7 +180,6 @@ class FaultAwareAdaptiveController:
         total_derate = (
             thermal_derate
             + cooling_penalty
-            + unbalance_penalty
             + operating_fault_penalty
             + sensor_penalty
         )

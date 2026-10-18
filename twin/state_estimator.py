@@ -25,7 +25,7 @@ class ThermalStateEstimator:
 
     Important design rule:
     the observer never receives hidden FMU fault parameters such as
-    cooling efficiency, Rth degradation, sensor bias, or unbalance.
+    cooling efficiency, Rth degradation, sensor bias, or supply degradation.
     """
 
     def __init__(

@@ -248,3 +248,226 @@ Run the complete test suite and report:
 - experiments completed
 - remaining limitations
 - exact commands required to reproduce the final setup.
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Final Project Completion: Induction Motor Digital Twin and Research Evaluation
+
+You are working in my existing Industry 4.0/5.0 Digital Twin research repository. Complete the project end-to-end so that the **18.5 kW Modelica Standard Library (MSL) squirrel-cage induction motor Digital Twin is the only supported plant model**. Remove the older synthetic 5.5 kW model and all obsolete dependencies, then execute a reproducible research evaluation and produce paper-ready results.
+
+## 1. Start with a repository audit and preserve working functionality
+
+Before modifying anything:
+
+- Inspect the repository structure, Git status, existing documentation, Modelica models, FMU export and validation scripts, Python simulation/runtime code, state estimator, fault detector/severity estimator, predictor, controllers, experiments, BaSyx/AAS integration, and tests.
+- Identify every dependency on the legacy 5.5 kW synthetic model, its profile/configuration, generated artifacts, and old experiment outputs.
+- Identify the exact current induction-motor FMU, its source Modelica model, parameter set, nominal-validation results, and the existing 36-run campaign outputs.
+- Establish which artifacts and results genuinely belong to the 18.5 kW plant.
+- Preserve unrelated user changes and do not overwrite or delete uncommitted work blindly.
+
+Do not assume Copilot's previous implementation report proves that every feature works. Inspect and verify the actual repository and runtime.
+
+## 2. Make the 18.5 kW induction motor the only supported plant
+
+- Retain the existing MSL squirrel-cage induction motor implementation and its supported electrical, electromagnetic, mechanical, loss, and thermal behavior.
+- Keep the Modelica Standard Library unmodified.
+- Remove the legacy synthetic 5.5 kW plant, its unused Modelica source files, obsolete profile/configuration options, old-model-only scripts, stale imports, and dead code **after confirming they are not required by the new plant or other functionality**.
+- Remove legacy-specific test fixtures and documentation, replacing them with induction-motor equivalents.
+- Search the entire repository for references to the old model and remove or update all obsolete references, except where the migration history is deliberately documented.
+- Remove old generated binaries and outputs only when they are clearly obsolete, reproducible, and not needed as evidence. Do not delete the only copy of useful results before preserving or documenting them.
+- Update all defaults, entry points, experiment runners, scripts, AAS metadata, and README commands so they select the 18.5 kW induction motor without requiring a legacy-profile flag.
+- Do not retain a silent fallback to the synthetic plant.
+
+If any old-model component is shared and still needed, extract or retain the reusable functionality without retaining the old plant as an executable alternative.
+
+## 3. Verify the physical model and parameter provenance
+
+Inspect `INDUCTION_MOTOR_REFERENCE.md`, the Modelica model, and all associated configuration files.
+
+Verify and document:
+
+- Rated power, voltage, frequency, pole count, rated speed, rated torque, and the rated operating point.
+- Stator and rotor resistances, leakage and magnetizing inductances, inertia, loss parameters, and thermal parameters wherever applicable.
+- Parameter provenance: manufacturer documentation, published reference, calculation, model identification, or explicit assumption.
+- Modelica parameter units, initialization, solver settings, and FMU input/output mappings.
+- The model's actual supported fault mechanisms and their physical implementation.
+
+Check consistency among power, speed, torque, voltage, current, power factor, losses, and efficiency. Distinguish shaft output power from electrical input power. Investigate discrepancies rather than adjusting parameters merely to obtain attractive results.
+
+Run nominal validation from a clean, reproducible command. Report the measured simulation values, reference values, relative/absolute errors, and acceptance criteria. If a parameter or reference cannot be verified, state that limitation explicitly.
+
+Do not describe the model as manufacturer-validated or experimentally validated unless the repository contains evidence supporting that claim.
+
+## 4. Stabilize the complete Digital Twin pipeline
+
+Ensure the induction motor works end-to-end with:
+
+- FMU export and runtime execution.
+- Electrical, mechanical, and thermal state extraction.
+- State estimation and temperature forecasting.
+- Fault detection and severity estimation.
+- Baseline threshold, fault-aware adaptive, and constrained adaptive controllers.
+- BaSyx/AAS synchronization through the six existing submodels.
+- Shared timestamp/snapshot identity, read/write status, synchronization latency, and failure handling.
+- Experiment execution, metric aggregation, and result export.
+
+Check signal names, units, scaling, rated-power normalization, temperature semantics, controller command semantics, and FMU communication-step assumptions.
+
+Verify that all controllers use the same plant interface and comparable operating conditions. If a controller does not use an available signal, document that fact; do not artificially give one controller extra information without identifying the comparison as unequal.
+
+Verify snapshot consistency: all values reported as one Digital Twin snapshot must correspond to the intended simulation instant. Avoid mixing pre-step and post-step measurements without explicit timestamps and documentation. Ensure the AAS timing metrics measure the actual operations they claim to measure.
+
+Fix real integration problems rather than bypassing tests or suppressing exceptions.
+
+## 5. Establish a final, reproducible experimental protocol
+
+Use the 18.5 kW plant exclusively. First inspect the existing scenario and experiment implementations, then define a consistent protocol that can be rerun from a documented command.
+
+Include, where physically supported by the implemented model:
+
+1. Healthy nominal operation.
+2. Cooling degradation.
+3. Temperature-sensor bias.
+4. Temperature-sensor freeze or loss of update.
+5. Voltage imbalance.
+6. Supply-frequency deviation.
+7. Increased mechanical load/overload.
+8. Increased friction or mechanical degradation.
+9. Mechanical unbalance.
+10. Selected combined-fault scenarios.
+
+Do not include a fault merely because it is listed above: verify that the plant actually represents it and that its effect is observable in the outputs. Clearly distinguish plant faults, sensor faults, injected disturbances, and estimator errors.
+
+For each scenario:
+
+- Use the same documented simulation duration and initial conditions for comparable controllers.
+- Use a defined fault-injection time and retain both pre-fault and post-fault observations.
+- Record the random seed and relevant parameters if randomness is used.
+- Reset controller, estimator, predictor, and detector state between independent runs.
+- Keep raw time-series data, configuration, run metadata, logs, and summary metrics.
+- Record failed runs and explain exclusions; do not silently discard inconvenient results.
+- Separate development/debugging runs from final evaluation runs.
+- Use enough independent repetitions for stochastic experiments; report variability and confidence intervals where appropriate. For deterministic runs, document determinism and avoid presenting repeated identical runs as independent statistical evidence.
+- Avoid changing thresholds or controller gains after examining final test outcomes. If tuning is needed, separate tuning scenarios from held-out evaluation scenarios.
+
+Use the existing 350–2700 s campaign if it remains appropriate, with a documented 350 s pre-fault interval and fault injection at 350 s. Adjust this protocol only if the actual model's thermal/electrical time constants or experiment design justify it, and document the reason. Ensure the post-fault period is long enough to evaluate the relevant response.
+
+## 6. Collect research metrics
+
+Calculate metrics from raw data using documented definitions and units. Include the following where the underlying signals support them:
+
+**Thermal safety**
+- Maximum winding and frame temperature.
+- Time and percentage of the run above warning, intervention, buffered safety, and critical thresholds.
+- Thermal-limit violations and duration.
+- Minimum thermal safety margin.
+- Time to detect risk and time to return to the safe envelope.
+
+**Operational performance**
+- Shaft output energy or useful mechanical work, if correctly available from the model.
+- Electrical input energy, if the model provides a valid measurement.
+- Energy per unit of useful output, when mathematically meaningful.
+- Load-command tracking error, mean commanded load, and derating fraction.
+- Speed and torque deviation from the operating target.
+- Time spent at reduced load and any emergency intervention.
+
+**Fault handling**
+- Detection delay.
+- Precision, recall, F1, and confusion matrix where labelled ground truth and appropriate sampling make these metrics meaningful.
+- Severity estimation error against the actual injected severity only if both quantities have the same defined physical meaning and scale.
+- Temperature-estimation MAE/RMSE and forecast MAE/RMSE for explicitly defined prediction horizons.
+- False alarms and missed detections.
+
+**Digital Twin/AAS performance**
+- AAS read/write success rates and failures.
+- Mean, median, p95 and, where useful, p99 latency.
+- Snapshot alignment errors, stale-data frequency, and synchronization failures.
+- End-to-end update-loop latency and measurement methodology.
+- FMU execution time and real-time feasibility relative to the simulated communication-step interval.
+
+**Energy and safety comparison**
+- Compare all controllers on identical scenario conditions.
+- Report both safety and useful output, rather than claiming success from temperature alone.
+- Quantify trade-offs and state clearly when a controller achieves safety through substantial production loss.
+- Do not infer real energy savings unless the model's electrical input energy and comparison methodology support that claim.
+
+Do not invent, hardcode, or manually adjust metric values. Every reported metric must be generated from actual run outputs.
+
+## 7. Perform controller and model sanity checks
+
+Before the final campaign, test at least:
+
+- Healthy operation should not trigger unnecessary derating under nominal conditions unless the configured control policy explicitly requires it.
+- A sensor bias alone must not be mistaken for an actual plant-temperature increase; verify that the estimator and controller handle it as designed.
+- Cooling degradation should affect the model's thermal response if the implemented fault is physically connected to cooling.
+- Overload, supply faults, and mechanical faults should affect the relevant plant signals according to the implemented physics.
+- Safety interventions should respect configured command limits and rate limits.
+- A controller must not receive future information or use true injected fault severity as an input unless explicitly designated as an oracle/reference controller.
+- Predicted temperatures must use only information available at the prediction time.
+- Missing, stale, invalid, or out-of-range sensor values must be handled explicitly.
+- Controller, estimator, and detector state must reset between runs.
+- Units, timestamps, and normalization must remain consistent throughout the pipeline.
+
+Add or update automated tests for these invariants.
+
+## 8. Run the final campaign and produce paper-ready artifacts
+
+Create a dedicated, clearly named output directory for the final research evaluation. Preserve existing historical outputs separately.
+
+Generate at least:
+
+- Machine-readable raw results and aggregated CSV files.
+- A complete run manifest with plant profile, parameters, controller settings, scenario, seed, software versions, FMU/model version, timestamps, and success/failure status.
+- A metric-definition document specifying formulas, units, sampling interval, and threshold semantics.
+- Nominal-validation results.
+- Controller-by-scenario comparison tables, including mean and variability where appropriate.
+- Publication-quality plots for temperature trajectories, fault onset, controller response, load derating, energy/output trade-offs, prediction errors, and AAS latency as applicable.
+- A concise research-results report containing methodology, results, limitations, and reproducibility instructions.
+- A final README describing setup, dependencies, FMU generation, validation, AAS startup, test execution, and the exact command to reproduce the evaluation.
+
+Plots and tables must be generated from the saved raw results, not hand-authored values. Preserve sufficient raw data to reproduce every table and figure.
+
+Do not fabricate statistical significance, confidence intervals, physical validation, or causal conclusions. Clearly label simulation-based evidence.
+
+## 9. Final verification and cleanup
+
+Run the complete automated test suite, nominal validation, FMU smoke test, AAS integration checks, and final evaluation campaign.
+
+Confirm that:
+
+- The 18.5 kW MSL induction motor is the only supported plant.
+- No active code path, default, configuration, or test depends on the legacy synthetic model.
+- All supported commands work from a clean environment using documented dependencies.
+- The six AAS submodels are consistent with the final plant interface.
+- All final figures and tables can be regenerated from the final raw outputs.
+- No critical test is skipped, weakened, or disabled just to achieve a passing result.
+- The final Git diff contains no unrelated modifications or accidental deletion of useful evidence.
+
+Do not claim successful execution of any step that you have not actually run.
+
+## 10. Final response
+
+When finished, give me a concise completion report with:
+
+1. Files/modules removed, retained, and changed.
+2. The exact command to validate the motor and the exact command to rerun the research campaign.
+3. Nominal validation results and acceptance criteria.
+4. Final test-suite result.
+5. Number of scenarios/runs completed and any failures.
+6. The main controller comparison results, with real measured numbers.
+7. The paths to the raw results, summary tables, plots, and report.
+8. Any remaining limitations, failed checks, or unverified assumptions.
+
+If any step cannot be completed because of a missing dependency, unavailable reference data, FMU issue, Docker/BaSyx failure, or insufficient runtime, report the exact blocker and continue with the independent tasks that can safely be completed.
+
+**Definition of done:** one supported 18.5 kW MSL induction-motor Digital Twin, no obsolete synthetic plant in active use, a passing and meaningful test suite, a reproducible and completed research evaluation, and a traceable paper-ready evidence package. Do not stop after editing files; execute and verify the deliverables.

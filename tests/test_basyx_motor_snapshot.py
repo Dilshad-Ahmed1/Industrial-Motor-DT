@@ -22,7 +22,20 @@ def test_aas_definition_contains_the_required_motor_telemetry() -> None:
         }
         for submodel in definition["submodels"]
     }
+    operational_values = {
+        element["idShort"]: element["value"]
+        for element in next(
+            submodel
+            for submodel in definition["submodels"]
+            if submodel["idShort"] == "OperationalState"
+        )["submodelElements"]
+    }
 
+    assert definition["idShort"] == "MotorDigitalTwinAAS"
+    assert definition["assetInformation"]["globalAssetId"].endswith(
+        "3ph_18_5kw_induction_01"
+    )
+    assert operational_values["MotorRatedOutputW"] == "18500.0"
     assert set(submodels) == {
         "OperationalState",
         "ElectricalState",
@@ -62,6 +75,8 @@ def test_aas_definition_contains_the_required_motor_telemetry() -> None:
         "CoolingCommandPu",
         "OperatingMode",
     } <= submodels["ControlInterface"]
+    assert "VibrationAmplitudeMmS" not in submodels["MechanicalState"]
+    assert "MechanicalUnbalanceActive" not in submodels["FaultState"]
 
 
 def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
@@ -87,8 +102,6 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
         "T_ambient_C": 20.0,
         "torque_motor_Nm": 110.0,
         "torque_load_Nm": 100.0,
-        "vibration_mm_s_out": 0.0,
-        "mechanical_unbalance_supported": 0.0,
         "thermal_margin_to_critical_K": 30.0,
     }
     estimate = SimpleNamespace(
@@ -100,7 +113,6 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
         sensor_bias=False,
         sensor_freeze=False,
         cooling_degradation=True,
-        mechanical_unbalance=False,
         load_overload=False,
         mechanical_friction=False,
         voltage_imbalance=False,
@@ -115,7 +127,6 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
     severity = {
         "overall": 0.4,
         "cooling_degradation": 0.4,
-        "mechanical_unbalance": 0.0,
     }
     snapshot = build_basyx_snapshot(
         measurement=measurement,
@@ -130,10 +141,10 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
         fault_active=True,
         true_fault_severities={"cooling": 0.4},
         controller_name="constrained",
-        plant_profile="induction",
         simulation_time_s=351.0,
         snapshot_timestamp_utc="2026-10-03T10:00:00.000+00:00",
         snapshot_id="test-run:702",
+        controller_operating_mode="ADAPTIVE_DERATE",
         critical_temperature_C=125.0,
     )
 
@@ -162,3 +173,4 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
     assert snapshot["fault"]["TrueFaultSeverity"] == 0.4
     assert snapshot["fault"]["EstimatedFaultSeverity"] == 0.4
     assert snapshot["control"]["ControllerName"] == "constrained"
+    assert snapshot["control"]["OperatingMode"] == "ADAPTIVE_DERATE"

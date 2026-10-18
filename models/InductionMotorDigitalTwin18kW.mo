@@ -227,10 +227,6 @@ package MotorDigitalTwin
       if T_winding_C>=T_critical_C then 2
       elseif T_winding_C>=100 then 1
       else 0;
-    output Real vibration_mm_s_out=0
-      "Unavailable: this rotational-only plant has no radial vibration model";
-    output Boolean mechanical_unbalance_supported=false;
-
   initial equation
     motor.i_0_s=0.0;
     der(motor.idq_sr)=fill(0.0, 2);

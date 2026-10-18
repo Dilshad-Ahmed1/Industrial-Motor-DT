@@ -1,264 +1,236 @@
-# Industrial Motor Digital Twin
+# 18.5 kW Induction-Motor Digital Twin
 
-This repository keeps two motor models side by side:
-
-1. **Legacy reference/fallback:** the WEG W22 5.5 kW reduced-order
-   electro-thermal-mechanical model.
-2. **Standard induction plant:** an MSL 4.1.0 squirrel-cage induction motor,
-   using the documented 18.5 kW reference dataset.
-
-The MSL plant is a separate Modelica composition around the unmodified
-`Modelica.Electrical.Machines.BasicMachines.InductionMachines.IM_SquirrelCage`.
-It does not replace or rewrite the WEG model, legacy FMU, or historical results.
+This repository supports one executable plant: the 18.5 kW Modelica Standard
+Library (MSL) squirrel-cage induction motor. The Digital Twin composes
+`Modelica.Electrical.Machines.BasicMachines.InductionMachines.IM_SquirrelCage`;
+MSL sources are not modified. The model is a simulation benchmark based on the
+MSL `IMC_withLosses` example, not a manufacturer-identified motor.
 
 ## Architecture
 
 ```text
-Modelica MSL motor FMU
-  electrical / torque / shaft dynamics / losses
-  winding and frame thermal network + physical fault inputs
-             |
-             v
+Modelica 3-phase IM_SquirrelCage + lumped winding/frame thermal network
+          | FMI 2.0 Co-Simulation (InductionMotorDigitalTwin18kW.fmu)
+          v
 simulation/fmu_runtime.py
-  typed FMI I/O; at most 0.1 s FMI substeps for induction plant
-             |
-             v
+  typed I/O; each control interval subdivided into <= 0.1 s FMI steps
+          v
 experiments/experiment_runner.py
-  measurement normalization -> thermal observer -> fault diagnosis/severity
+  measured sample -> thermal observer -> fault diagnosis/severity
   -> 30/60 s forecast -> baseline/adaptive/constrained controller
-             |
-             +--> timestamped experiment CSV + JSON metrics
-             |
-             +--> existing Eclipse BaSyx v2 AAS Environment
-                   OperationalState, ElectricalState, MechanicalState,
-                   ThermalState, FaultState, ControlInterface
+          +--> raw time-series CSV + per-run metrics JSON
+          +--> six BaSyx AAS submodels with shared snapshot ID/time
+          v
+experiments/run_research_evaluation.py
+  deterministic scenario/controller campaign + immutable run manifest
+          v
+analysis/generate_research_artifacts.py
+  tables and plots regenerated from the saved raw time series
 ```
 
-All six submodels carry an identical `SnapshotId`, UTC capture timestamp, and
-simulation-time value for each synchronization. Each experiment builds the
-snapshot once from pre-step values, then updates all six submodels and reads
-back values, including each snapshot ID, to verify synchronization.
-`TrueFaultSeverity` is simulation ground truth and is published only for
-evaluation; estimated fault severity is computed from observer/detector
-signals. In the experiment CSV, MSL component losses and winding temperature
-are explicitly named as truth channels; the estimator/predictor/controller
-receive current input/shaft-power observations and model-based estimates, not
-future plant state.
+The six AAS submodels remain `OperationalState`, `ElectricalState`,
+`MechanicalState`, `ThermalState`, `FaultState`, and `ControlInterface`.
+Snapshot values are assembled from one pre-step simulation sample; all
+submodels receive the same simulation time, UTC capture timestamp, and
+snapshot ID. The bridge writes the six submodels and reads back values to
+measure synchronization and alignment.
 
-BaSyx service URLs default to:
+True FMU winding temperature and component-loss values are retained only in
+the evaluation log. The estimator, detector, predictor, and controllers use
+current measured channels, observer state, and model-based estimates; they do
+not receive future plant values or the injected fault severity. Thermal
+temperatures in the Twin/AAS represent estimates, with the sensor reading
+reported separately. The true severity log/AAS value is evaluation ground
+truth, not a controller input.
 
-- AAS Registry: `http://localhost:8080`
-- AAS Environment: `http://localhost:8081`
-- Submodel Registry: `http://localhost:8082`
+`u_speed_pu` is a supply V/f operating command, not a closed-loop shaft-speed
+setpoint. All three controllers currently hold it at nominal; speed error is
+reported relative to nominal rated speed. Baseline control uses the
+temperature sensor with its diagnosed reliability, while adaptive and
+constrained control also use observer, diagnosis, and forecast outputs. The
+information difference is intentional and should be considered when
+interpreting controller comparisons.
 
-The stable AAS shell/global asset identifiers remain those of the original
-reference asset. `OperationalState.PlantProfile` and the rated-value fields
-make the active simulation profile explicit; do not interpret the induction
-profile as physical measurements from the legacy WEG asset.
+## Plant parameters and provenance
 
-## Motor parameters and provenance
+The reference point is 18,500 W shaft power, 400 V line-to-line RMS, 32.85 A,
+50 Hz, four poles, 1462.5 rpm, 120.79 N·m shaft torque, power factor 0.898,
+and efficiency 90.49%. The MSL example provides the reference equivalent
+circuit and loss data. Reactances are converted to inductances with
+`L = X / (2*pi*f)`. The nominal shaft torque is calculated from
+`T = P / omega`; the electromagnetic torque is calculated from shaft torque
+plus friction and stray-load loss torque.
 
-The new plant uses the Modelica Standard Library example `IMC_withLosses`,
-described as a standard 18.5 kW, 400 V, 50 Hz motor with published equivalent
-circuit parameters, loss breakdown and measurements. MSL does not name a
-manufacturer/model. The complete parameter list and its manufacturer,
-reference, calculated and assumed provenance are documented in
+Stator/rotor resistances, leakage and magnetizing inductances, rotor inertia,
+core loss, friction loss, and stray-load loss are MSL example/reference
+values or inherited MSL parameter-record defaults. The separate winding/frame
+thermal capacitances and resistances, fault magnitudes, diagnostic thresholds,
+and 100/120 °C warning/critical policy are explicit model/controller
+assumptions, not verified motor ratings. The full parameter-by-parameter
+provenance and nominal validation method are in
 [INDUCTION_MOTOR_REFERENCE.md](./INDUCTION_MOTOR_REFERENCE.md).
 
-No complete, verifiable equivalent-circuit set was found for the preferred
-5–7.5 kW range. The MSL benchmark is used rather than silently fabricating
-parameters for the original WEG 5.5 kW motor.
+## Fault model
 
-## Fault mechanisms
+| Scenario | Implemented mechanism |
+|---|---|
+| `healthy` | No injected fault |
+| `cooling` | Reduces frame-to-ambient conductance |
+| `rth_degradation` | Increases winding-to-frame thermal resistance |
+| `sensor_bias` | Adds a bias to the temperature-sensor channel only |
+| `sensor_freeze` | Freezes the sensor sample; plant temperatures continue changing |
+| `voltage_imbalance` | Increases phase-A amplitude; filtered phase RMS values measure imbalance |
+| `supply_degradation` | Reduces all three supply-phase amplitudes |
+| `frequency_deviation` | Changes the three-phase supply frequency |
+| `overload` | Raises applied shaft-load torque, within the actuator/safety limits |
+| `mechanical_friction` | Adds speed-opposing shaft friction torque |
+| `combined_supported` | Sensor bias, cooling degradation, overload, and voltage reduction |
 
-Supported by the induction plant:
+The rotational plant has no radial degrees of freedom, so mechanical unbalance
+and vibration are unsupported and are not simulated or reported. Fault
+amplitudes are controlled stress-test assumptions, not calibrated field
+severity. Cooling, overload, electrical supply, friction, and sensor faults
+affect their documented physical or measurement channels; see the reference
+document for signal-level detail and limitations.
 
-- Cooling degradation changes frame-to-ambient conductance; a separate
-  winding-frame resistance multiplier is available.
-- Sensor bias and freeze affect the sensor channel, not true winding state.
-- Overload changes shaft-load torque; a smooth actuator slew limits torque
-  rate.
-- Increased mechanical friction applies additional speed-opposing torque.
-- Supply degradation scales all phase amplitudes; voltage imbalance modifies
-  phase A and is diagnosed from filtered phase RMS values.
-- Frequency deviation changes the three-phase source frequency.
-- `combined_supported` combines sensor bias, cooling degradation, overload,
-  and supply voltage reduction.
+## Setup and verification
 
-Mechanical unbalance is not supported by the new model because it has no radial
-degrees of freedom. The runner rejects that scenario for the induction model
-instead of simulating a fabricated vibration signal. It remains available for
-the legacy plant.
-
-Fault amplitudes and thermal RC values are test/model assumptions, not
-manufacturer failure limits. The source, affected channels, diagnostics and
-limitations are recorded in the motor reference document.
-
-## Build, validate, and test
-
-Windows PowerShell, from the repository root:
+Use Python 3.12 and install the declared packages with
+`.\.venv\Scripts\python.exe -m pip install -r requirements.txt`. FMU export
+requires OpenModelica 1.27.1 with MSL 4.1.0:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\export_induction_fmu.py --overwrite
+.\.venv\Scripts\python.exe scripts\validate_induction_motor_nominal.py
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The exporter requires OpenModelica 1.27.1 and MSL 4.1.0. It checks the model,
-exports FMI 2.0 Co-Simulation, and validates the FMU interface.
+Nominal validation exports and simulates the standalone induction-motor
+reference case, compares voltage/current/frequency/speed/slip/torque/input
+power/output power/efficiency/power factor/losses against the documented MSL
+nominal operating point, checks stability, and saves the raw CSV and JSON
+validation report in a new `results/induction_motor_nominal/run_*` folder.
+Passing this simulation check is not experimental or manufacturer validation.
 
-## Experiments
-
-Single experiment. The fault-free interval is `[0, fault-time)` and the
-selected scenario activates at `fault-time`; use the required 350–800 s window
-as follows:
-
-```powershell
-.\.venv\Scripts\python.exe -m experiments.experiment_runner `
-  --fmu models\InductionMotorDigitalTwin18kW.fmu `
-  --plant-profile induction `
-  --scenario cooling `
-  --controller constrained `
-  --stop 800 --fault-time 350 --step 0.5 `
-  --output results\induction_manual\cooling_constrained.csv
-```
-
-Supported induction scenario names are `healthy`, `cooling`, `sensor_bias`,
-`sensor_freeze`, `voltage_imbalance`, `frequency_deviation`, `overload`,
-`mechanical_friction`, and `combined_supported`. Controllers are `baseline`,
-`adaptive`, and `constrained`. The unsupported `unbalance` scenario is
-available only with a plant that implements radial mechanics.
-
-For live AAS writes/read-back measurements, add `--basyx` and optionally
-`--basyx-host` and `--basyx-period`:
+One closed-loop experiment can be run with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m experiments.experiment_runner `
   --fmu models\InductionMotorDigitalTwin18kW.fmu `
-  --plant-profile induction `
-  --scenario combined_supported `
-  --controller constrained `
-  --stop 800 --fault-time 350 --step 0.5 `
-  --output results\induction_manual\combined_constrained_basyx.csv `
-  --basyx --basyx-host http://localhost:8081 --basyx-period 10
+  --scenario cooling --controller constrained `
+  --stop 2700 --fault-time 350 --step 0.5 `
+  --output results\manual\cooling_constrained.csv
 ```
 
-The comparison campaign runs all three controllers for each supported
-induction scenario, plus healthy/cooling/unbalance runs for all three
-controllers on the preserved legacy FMU. It runs one AAS-enabled induction
-combined-fault constrained case when `--with-basyx` is given. It creates a new
-UTC timestamped results folder and writes each run's CSV, JSON metrics, log,
-an aggregate `comparison.csv`, and `campaign.json`; it never reuses an
-existing campaign folder.
+The runner refuses to overwrite output and rejects any FMU other than the
+named induction plant. The default protocol is 350 s pre-fault and 2350 s
+post-fault, with 0.5 s control samples. The FMU is advanced in at-most-0.1 s
+communication substeps because of the tested OpenModelica CVODE export
+constraint.
+
+## BaSyx / AAS
+
+Start the existing Eclipse BaSyx services and seed the six-submodel AAS:
 
 ```powershell
-.\.venv\Scripts\python.exe -m experiments.run_motor_comparison `
-  --induction-fmu models\InductionMotorDigitalTwin18kW.fmu `
-  --legacy-fmu MotorElectroThermalMechanicalFaultable.fmu `
-  --stop 800 --fault-time 350 --step 0.5 --with-basyx
+docker compose -f docker\docker-compose.yml up -d
+.\.venv\Scripts\python.exe scripts\seed_basyx.py
 ```
 
-The campaign reports actual maximum winding temperature, time above the
-configured critical temperature, minimum thermal margin, state-estimation MAE,
-fault-specific detection latency, true/estimated severity MAE, 30/60 s
-prediction MAE, electrical energy, useful work, their ratio, load derating,
-speed/torque command errors, solver runtime and simulation real-time factor.
-When BaSyx is enabled, it also reports measured write/read/end-to-end latency,
-write/read success rates, and cross-submodel snapshot-ID alignment. Missing
-measurements remain missing; no experiment result is synthesized or imputed.
+The default AAS services are the registry on port 8080, environment on 8081,
+and submodel registry on 8082. To run a measured AAS sync case, add
+`--basyx --basyx-host http://localhost:8081 --basyx-period 10` to the
+experiment command. If the services are unavailable the experiment reports
+the failure; it does not substitute synthetic latency or success values.
 
-## Validation methodology and model comparison
+## Final research campaign
 
-The new Modelica model is checked and simulated before FMU export. FMI runtime
-tests cover nominal channels, supported fault mechanisms, finite/physical
-outputs, observer/predictor/controller operation, and AAS snapshot structure.
-The end-to-end experiment records pre-step observer/controller/AAS values at
-simulation instant `t`; the post-step FMU sample is used at the next loop.
-Forecasts are evaluated against the future winding-temperature sample at their
-30 s/60 s horizon. Fault detection latency is based on the relevant detected
-fault channel (or a supported component for a combined scenario), not merely
-on a generic thermal alarm.
+From the repository root, the default command runs all 11 supported scenarios
+with all 3 controllers: 33 deterministic cases, each at 2700 s with fault
+injection at 350 s and a 0.5 s sample interval:
 
-For a fair quantitative comparison, use the matched cooling-fault experiments
-in `comparison.csv` with the same controller, stop/fault time and communication
-step. Compare measured trajectories and runtime metrics, not raw signals with
-different units or hidden truths:
+```powershell
+.\.venv\Scripts\python.exe -m experiments.run_research_evaluation
+```
 
-- **Physical behavior:** the legacy model is calibrated to the WEG 5.5 kW
-  rating and uses reduced-order torque/current/loss relations. The MSL plant
-  resolves three-phase electrical state, electromagnetic torque, rotor/load
-  mechanics, and MSL losses; its benchmark is 18.5 kW and its thermal network
-  remains lumped and assumed.
-- **Fault response:** compare supported cooling/common faults at matching
-  severity only where each FMU exposes a corresponding input. Mechanical
-  unbalance is comparable only on the legacy plant; the MSL rotational model
-  explicitly does not claim it.
-- **Computational cost:** use campaign mean solver-step cost and simulation
-  real-time factor. The induction FMU requires internal FMI communication
-  substeps no larger than 0.1 s with the tested OpenModelica CVODE build; this
-  solver limit does not imply a physical 10 Hz motor model.
-- **Real-time feasibility:** `--realtime` measures wall-clock pacing and
-  deadline misses for an actual experiment. Simulation-throughput real-time
-  factor alone is not an assertion about production deployment or network
-  latency. BaSyx timing is reported only when the AAS integration ran.
+To measure live AAS synchronization for the combined-fault constrained case:
 
-## Executed comparison campaign
+```powershell
+.\.venv\Scripts\python.exe -m experiments.run_research_evaluation --with-basyx
+```
 
-The full requested campaign was run with the above command at
-`stop=800 s`, `fault-time=350 s`, `step=0.5 s`. The preserved outputs are in
-[`results/motor_model_comparison/20261003T111253Z`](./results/motor_model_comparison/20261003T111253Z):
-36/36 runs completed successfully (27 induction scenarios/controller cases
-and 9 legacy cases). Every stored run had finite winding-temperature,
-speed, electrical-power, and shaft-power samples. The aggregate
-[`comparison.csv`](./results/motor_model_comparison/20261003T111253Z/comparison.csv)
-contains thermal, detection, severity, prediction, energy/work, derating,
-speed/torque, solver-throughput, and AAS metrics.
+Each invocation creates a new
+`results/research_evaluation/<UTC timestamp>/` directory containing raw CSVs,
+per-run metrics JSON, logs, `manifest.json`, `campaign.json`, and
+`controller_scenario_comparison.csv`. The manifest records model/FMUs/config
+hashes, software versions, protocol, controller/scenario parameters, run
+times, command lines, and failed-run evidence. No random inputs are used, so
+one run per case is deterministic evidence, not a statistical sample.
 
-Measured matched cooling results (full-window winding maximum and total
-electrical-energy/useful-work ratio):
+Generate paper figures and tables from a completed campaign's raw CSVs:
 
-| Controller | Induction max winding °C | Legacy max winding °C | Induction energy/work | Legacy energy/work | Cooling detection latency |
-|---|---:|---:|---:|---:|---|
-| Baseline | 97.73 | 77.27 | 1.1052 | 1.1148 | Induction 2.0 s; legacy not detected |
-| Adaptive | 96.36 | 75.15 | 1.1043 | 1.1137 | Induction 2.0 s; legacy not detected |
-| Constrained | 95.19 | 77.27 | 1.1038 | 1.1148 | Induction 2.0 s; legacy not detected |
+```powershell
+.\.venv\Scripts\python.exe -m analysis.generate_research_artifacts `
+  --campaign results\research_evaluation\<UTC timestamp>
+```
 
-These absolute temperatures and energy/work values are not a like-for-like
-motor efficiency or thermal-rating comparison: the legacy model is rated
-5.5 kW and the new MSL benchmark is rated 18.5 kW, with different thermal
-parameterizations. The cooling-fault legacy cases had no post-fault alarm, so
-fault-specific detection latency is missing (NaN); this is a measured
-limitation of the legacy detection path, not a zero latency. On the induction
-cooling runs, maximum winding temperature was 95.19–97.73 °C and the
-fault-specific detector responded in 2.0 s. No run exceeded the configured
-120 °C critical threshold.
+The completed 33-run campaign is in
+[results/research_evaluation/20261016T172551Z](./results/research_evaluation/20261016T172551Z/).
+All 33 scenario/controller cases completed with no failures. Its
+[manifest](./results/research_evaluation/20261016T172551Z/manifest.json),
+[summary table](./results/research_evaluation/20261016T172551Z/summary_metrics.csv),
+and [research report](./results/research_evaluation/20261016T172551Z/RESEARCH_REPORT.md)
+are generated from the raw run CSVs.
 
-Across all completed runs, mean per-step solver time was 9.24 ms for the
-induction FMU (mean measured simulation-throughput factor 56.1×) and
-0.0104 ms for the legacy FMU (53,133×). Both therefore simulated faster than
-the requested 0.5 s control interval when measured without external pacing or
-AAS calls. The AAS-enabled combined/constrained induction run synchronized
-81 snapshots and read 972 submodels successfully: write, read, and
-cross-submodel snapshot-alignment rates were each 100%. Mean AAS write/read
-latencies were 308.08/22.96 ms; mean end-to-end loop latency was 586.87 ms
-(P95 776.86 ms). Since this AAS loop mean exceeds the 500 ms controller
-interval, synchronous AAS use on every control cycle is not demonstrated as
-real-time feasible. The campaign used a 10 s AAS synchronization interval and
-did not enable wall-clock `--realtime` pacing; deadline-miss rates were not
-measured.
+Across scenarios, the mean maximum winding temperature was 96.171 °C for
+baseline, 95.343 °C for adaptive, and 94.825 °C for constrained control. No
+case crossed the configured 120 °C critical threshold; the hottest case was
+baseline under cooling degradation at 112.741 °C. Mean useful shaft work was
+12.377, 13.104, and 13.278 kWh respectively, and mean electrical energy was
+13.639, 14.414, and 14.602 kWh. These are equally weighted deterministic
+scenario averages, not statistical estimates or a universal controller
+ranking. Controller signal access differs as described above.
+
+The completed controller campaign did not enable AAS. Separate live BaSyx
+smoke evidence is retained at
+`results/research_evaluation/basyx_smoke_20261016_retry/20261016T171418Z/`:
+one write, 12 reads, and one aligned snapshot succeeded; write latency was
+443.361 ms and the single end-to-end loop was 1055.599 ms. This single snapshot
+is a connectivity/snapshot smoke check, not a representative latency
+distribution or real-time guarantee. Detailed methodology, limitations, and
+all measured controller metrics are in
+[REPRODUCIBILITY.md](./REPRODUCIBILITY.md).
+
+The metric formulas, units, sampling convention, and threshold semantics are
+defined in [METRIC_DEFINITIONS.md](./METRIC_DEFINITIONS.md).
+
+A historical comparison with the former reduced-order model was recomputed
+from preserved runs and is available as
+[MODEL_COMPARISON.md](./results/research_evaluation/20261016T172551Z/MODEL_COMPARISON.md),
+with [run-level metrics](./results/research_evaluation/20261016T172551Z/model_comparison_runs.csv)
+and [scenario summaries](./results/research_evaluation/20261016T172551Z/model_comparison_summary.csv).
+It pairs only healthy and cooling runs because those are the only shared
+scenarios in the archive. The old 5.5 kW traces start at 30 °C, compared with
+90 °C for the 18.5 kW MSL runs, so temperature and energy differences are not
+an equal-initial-condition model validation. The historical per-step solver
+timings averaged 0.01171 ms for the reduced-order traces and 9.54316 ms for the
+MSL traces (about 815×), but the archive lacks a software/hardware manifest;
+this is indicative simulation evidence, not a controlled runtime benchmark.
+The old plant remains removed from supported code paths; historical raw results
+are retained only for this explicitly limited comparison.
 
 ## Limitations
 
-- The standard MSL case is 18.5 kW rather than the preferred 5–7.5 kW, because
-  a complete, traceable smaller-motor parameter set was not available.
-- Winding/frame thermal capacitances and resistances, load slew, fault
-  amplitudes, diagnostic thresholds and the inherited 100/120 °C safety
-  envelope are assumptions or Twin settings, not verified ratings for the
-  unidentified MSL benchmark.
-- Cooling-residual thresholds were calibrated on a noiseless simulated
-  channel; physical sensor error/noise and cooling response require validation.
-- Mechanical unbalance/radial vibration is not represented by the MSL variant.
-- Live AAS performance depends on the local BaSyx deployment and is reported
-  only when the corresponding run actually completed.
-- `README_STEP1.md` is a preserved historical foundation note for the legacy
-  stage; these current instructions supersede its “do not tune controllers”
-  instruction.
+- The MSL benchmark is 18.5 kW, not a specific manufacturer motor.
+- The integrated thermal network is lumped and uses assumed RC parameters.
+- MSL thermal coupling omits or simplifies some core-loss thermal paths.
+- Fault magnitudes and 100/120 °C thresholds have not been validated against
+  physical equipment.
+- Cooling residual thresholds are tuned to the noiseless simulated channel;
+  physical sensor noise, sensor dynamics, and uncertainty are not modeled.
+- Mechanical unbalance/radial vibration is not represented.
+- Live AAS latency depends on the local container runtime and deployment.
+- Simulation throughput is not a hardware real-time certification.
+
+Historical outputs are retained for traceability but are not inputs to the
+induction-only final campaign or evidence for its reported results.

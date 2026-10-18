@@ -11,6 +11,7 @@ from control.constrained_adaptive_controller import ConstrainedAdaptiveControlle
 from experiments.experiment_runner import (
     _adapt_measurement,
     _digital_twin_measurement,
+    run_experiment,
 )
 from simulation.fmu_runtime import FMURuntime
 from twin.fault_detector import FaultDetector
@@ -38,6 +39,7 @@ def test_induction_loss_estimates_do_not_expose_hidden_fmu_losses() -> None:
             "T_frame_C": 77.5,
             "T_sensor_C": 90.0,
             "T_ambient_C": 20.0,
+            "omega_rad_s": 2.0 * math.pi * 1450.0 / 60.0,
             "P_electrical_W": 1200.0,
             "P_shaft_W": 1000.0,
             "P_loss_total_W": 170.0,
@@ -47,8 +49,8 @@ def test_induction_loss_estimates_do_not_expose_hidden_fmu_losses() -> None:
             "I_rms_A": 10.0,
             "speed_rpm": 1450.0,
             "torque_load_Nm": 50.0,
+            "torque_motor_Nm": 52.0,
         },
-        "induction",
         rated_current_A=32.85,
         rated_voltage_V=400.0,
         rated_frequency_Hz=50.0,
@@ -59,7 +61,7 @@ def test_induction_loss_estimates_do_not_expose_hidden_fmu_losses() -> None:
         ambient_C=20.0,
         winding_loss_fraction=0.644,
     )
-    twin_inputs = _digital_twin_measurement(measurement, "induction")
+    twin_inputs = _digital_twin_measurement(measurement)
 
     assert measurement["truth_P_motor_losses_W"] == 150.0
     assert twin_inputs["P_loss_total_W"] == pytest.approx(200.0)
@@ -67,6 +69,8 @@ def test_induction_loss_estimates_do_not_expose_hidden_fmu_losses() -> None:
     assert twin_inputs["P_fixed_losses_W"] == pytest.approx(71.2)
     assert not any(name.startswith("truth_") for name in twin_inputs)
     assert "T_winding_C" not in twin_inputs
+    assert "T_frame_K" not in twin_inputs
+    assert "T_ambient_K" not in twin_inputs
     assert "thermal_margin_to_critical_K" not in twin_inputs
 
 
@@ -107,7 +111,6 @@ def test_induction_fmu_nominal_operation_is_finite_and_physical() -> None:
     assert measurement["T_winding_C"] >= measurement["T_ambient_C"]
     assert measurement["T_frame_C"] >= measurement["T_ambient_C"]
     assert measurement["voltage_unbalance_percent"] < 2.0
-    assert measurement["mechanical_unbalance_supported"] == 0.0
 
 
 def test_supported_fault_inputs_affect_only_physical_channels() -> None:
@@ -179,8 +182,6 @@ def test_estimator_predictor_and_existing_controllers_accept_induction_signals()
         "I_rms_A": 10.0,
         "current_pu": 0.3,
         "load_torque_pu": 0.5,
-        "vibration_mm_s_out": 0.0,
-        "mechanical_unbalance_supported": 0.0,
         "rated_output_W": 18500.0,
         "rated_voltage_line_line_V": 400.0,
         "line_voltage_rms_V": 400.0,
@@ -263,8 +264,6 @@ def test_induction_cooling_residual_detection_and_severity_are_persistent() -> N
     )
     measurement = {
         "T_sensor_C": 95.0,
-        "vibration_mm_s_out": 0.0,
-        "mechanical_unbalance_supported": 0.0,
         "current_pu": 0.9,
         "load_torque_pu": 0.9,
         "friction_excess_estimate_W": 0.0,
@@ -282,3 +281,29 @@ def test_induction_cooling_residual_detection_and_severity_are_persistent() -> N
 
     assert detection.cooling_degradation
     assert severity["cooling_degradation"] == pytest.approx(0.3)
+
+
+def test_experiment_logs_sample_state_and_next_interval_fault_separately(
+    tmp_path: Path,
+) -> None:
+    if not FMU_PATH.is_file():
+        pytest.skip("Export the induction-motor FMU to run this integration test.")
+
+    dataframe, metrics = run_experiment(
+        fmu_path=FMU_PATH,
+        scenario_name="cooling",
+        controller_name="baseline",
+        stop_time=2.0,
+        step=0.5,
+        fault_time=1.0,
+        output=tmp_path / "sample_alignment.csv",
+    )
+
+    sampled_times = dataframe["time_s"].round(6)
+    injection_sample = dataframe.loc[sampled_times == 1.0].iloc[0]
+    first_faulted_sample = dataframe.loc[sampled_times == 1.5].iloc[0]
+    assert not bool(injection_sample["fault_active"])
+    assert bool(injection_sample["fault_input_active_for_next_interval"])
+    assert bool(first_faulted_sample["fault_active"])
+    assert metrics["faulted_interval_duration_s"] == pytest.approx(1.0)
+    assert dataframe["sample_interval_s"].sum() == pytest.approx(2.0)

@@ -9,15 +9,17 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+from experiments.experiment_runner import SCENARIOS as EXPERIMENT_SCENARIOS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_ROOT = PROJECT_ROOT / "results"
-DEFAULT_FMU = PROJECT_ROOT / "MotorElectroThermalMechanicalFaultable.fmu"
-SCENARIOS = ["healthy", "sensor_bias", "cooling", "unbalance", "combined"]
+DEFAULT_FMU = PROJECT_ROOT / "models" / "InductionMotorDigitalTwin18kW.fmu"
+SCENARIOS = sorted(EXPERIMENT_SCENARIOS)
 CONTROLLERS = ["baseline", "adaptive", "constrained"]
 
 st.set_page_config(page_title="Motor Digital Twin | Industry 5.0", page_icon="⚙️", layout="wide")
@@ -43,16 +45,9 @@ def temperature_color(value: float) -> str:
     return "#20d7c7"
 
 
-def vibration_color(value: float) -> str:
-    if not np.isfinite(value): return "#65758a"
-    if value >= 8: return "#f22f3d"
-    if value >= 5: return "#ff9f1c"
-    return "#7ddf64"
-
-
 def motor_svg(row: pd.Series) -> str:
     winding = float(row.get("T_winding_C", np.nan)); frame = float(row.get("T_frame_C", np.nan))
-    power = float(row.get("P_electrical_W", np.nan)); vibration = float(row.get("vibration_mm_s_out", np.nan)); speed = float(row.get("speed_rpm", np.nan))
+    power = float(row.get("P_electrical_W", np.nan)); speed = float(row.get("speed_rpm", np.nan))
     power_width = int(np.clip(6 + (0 if not np.isfinite(power) else power / 1200), 6, 22))
     rotation = 0 if not np.isfinite(speed) else int(speed % 360)
     return f'''<svg viewBox="0 0 740 370" width="100%" role="img" aria-label="Live motor state">
@@ -60,12 +55,24 @@ def motor_svg(row: pd.Series) -> str:
     <rect x="68" y="80" width="510" height="210" rx="45" fill="url(#housing)" stroke="#84b7d8" stroke-width="4"/><rect x="560" y="122" width="105" height="126" rx="20" fill="#294b67" stroke="#84b7d8" stroke-width="3"/><path d="M665 185 H720" stroke="#c5d7e8" stroke-width="16" stroke-linecap="round"/>
     <circle cx="323" cy="185" r="95" fill="#0b1827" stroke="{temperature_color(frame)}" stroke-width="10" filter="url(#glow)"/><circle cx="323" cy="185" r="69" fill="#172d40" stroke="{temperature_color(winding)}" stroke-width="24" filter="url(#glow)"/><circle cx="323" cy="185" r="42" fill="#8ca7ba" stroke="#dcecf6" stroke-width="4"/>
     <g transform="rotate({rotation} 323 185)" stroke="#eaf6ff" stroke-width="7" stroke-linecap="round"><path d="M323 145 V225"/><path d="M283 185 H363"/><path d="M295 157 L351 213"/><path d="M351 157 L295 213"/></g>
-    <path d="M42 142 H92" stroke="#44b9ff" stroke-width="{power_width}" stroke-linecap="round" filter="url(#glow)"/><path d="M58 112 l-22 30 h19 l-16 30" fill="none" stroke="#8de9ff" stroke-width="5"/><g fill="{vibration_color(vibration)}" filter="url(#glow)"><circle cx="620" cy="100" r="8"/><circle cx="645" cy="84" r="5"/><circle cx="673" cy="102" r="6"/></g>
+    <path d="M42 142 H92" stroke="#44b9ff" stroke-width="{power_width}" stroke-linecap="round" filter="url(#glow)"/><path d="M58 112 l-22 30 h19 l-16 30" fill="none" stroke="#8de9ff" stroke-width="5"/>
     <text x="110" y="325" fill="#b8d2e8" font-family="sans-serif" font-size="18">Electrical input</text><text x="263" y="350" fill="#b8d2e8" font-family="sans-serif" font-size="18">Winding &amp; rotor</text><text x="555" y="280" fill="#b8d2e8" font-family="sans-serif" font-size="18">Mechanical output</text></svg>'''
 
 
 def result_files() -> list[Path]:
-    return sorted(RESULTS_ROOT.rglob("*.csv"), key=lambda file: file.stat().st_mtime, reverse=True) if RESULTS_ROOT.exists() else []
+    roots = (
+        RESULTS_ROOT / "research_evaluation",
+        RESULTS_ROOT / "manual",
+        RESULTS_ROOT / "induction_motor_nominal",
+    )
+    files = [
+        path
+        for root in roots
+        if root.exists()
+        for path in root.rglob("*.csv")
+        if not path.name.endswith("_basyx_detail.csv")
+    ]
+    return sorted(files, key=lambda file: file.stat().st_mtime, reverse=True)
 
 
 def run_command(command: list[str], title: str) -> bool:
@@ -87,8 +94,8 @@ def run_command(command: list[str], title: str) -> bool:
 
 def download_buttons(dataframe: pd.DataFrame, stem: str) -> None:
     first, second = st.columns(2)
-    first.download_button("Download CSV", dataframe.to_csv(index=False).encode("utf-8"), f"{stem}.csv", "text/csv", use_container_width=True)
-    second.download_button("Download JSON", dataframe.to_json(orient="records", indent=2).encode("utf-8"), f"{stem}.json", "application/json", use_container_width=True)
+    first.download_button("Download CSV", dataframe.to_csv(index=False).encode("utf-8"), f"{stem}.csv", "text/csv")
+    second.download_button("Download JSON", dataframe.to_json(orient="records", indent=2).encode("utf-8"), f"{stem}.json", "application/json")
 
 
 def show_motor(dataframe: pd.DataFrame) -> None:
@@ -102,7 +109,7 @@ def show_motor(dataframe: pd.DataFrame) -> None:
         st.markdown("<div class='legend'><span><i class='dot' style='background:#20d7c7'></i>normal</span><span><i class='dot' style='background:#ff9f1c'></i>warning</span><span><i class='dot' style='background:#f22f3d'></i>critical</span></div>", unsafe_allow_html=True)
     with right:
         st.markdown("#### Live component state"); st.caption(f"Simulation time: {float(row['time_s']):.2f} s")
-        for label, column, unit in [("Winding", "T_winding_C", "°C"), ("Frame", "T_frame_C", "°C"), ("Electrical power", "P_electrical_W", "W"), ("Speed", "speed_rpm", "rpm"), ("Vibration", "vibration_mm_s_out", "mm/s"), ("Load command", "u_load_torque_pu", "pu")]:
+        for label, column, unit in [("Winding", "T_winding_C", "°C"), ("Frame", "T_frame_C", "°C"), ("Electrical power", "P_electrical_W", "W"), ("Speed", "speed_rpm", "rpm"), ("Current", "I_rms_A", "A"), ("Load command", "u_load_torque_pu", "pu")]:
             value = row.get(column, np.nan); st.metric(label, "—" if pd.isna(value) else f"{float(value):,.2f} {unit}")
 
 
@@ -112,19 +119,20 @@ def main() -> None:
     if "selected_result" not in st.session_state: st.session_state.selected_result = None
     with st.sidebar:
         st.header("Experiment launcher")
-        scenario = st.selectbox("Scenario", SCENARIOS, index=SCENARIOS.index("combined")); controller = st.selectbox("Controller", CONTROLLERS, index=CONTROLLERS.index("constrained"))
-        stop = st.number_input("Stop time (s)", min_value=1.0, value=1800.0, step=60.0); step = st.number_input("Communication step (s)", min_value=0.01, value=0.5, step=0.1, format="%.2f"); fault = st.number_input("Fault injection time (s)", min_value=0.0, value=600.0, step=30.0)
-        basyx = st.toggle("Enable BaSyx AAS synchronization"); host = st.text_input("AAS environment URL", "http://localhost:8081", disabled=not basyx); period = st.number_input("BaSyx synchronization period (s)", min_value=0.1, value=2.0, step=0.5, disabled=not basyx)
-        output_name = f"{scenario}_{controller}_{stop:g}s{'_basyx' if basyx else ''}.csv"; st.caption(f"Output: results/{output_name}")
-        if st.button("▶ Run experiment", type="primary", use_container_width=True):
-            command = [sys.executable, "-m", "experiments.experiment_runner", "--fmu", str(DEFAULT_FMU), "--scenario", scenario, "--controller", controller, "--stop", str(stop), "--step", str(step), "--fault-time", str(fault), "--output", str(RESULTS_ROOT / output_name)]
+        scenario = st.selectbox("Scenario", SCENARIOS, index=SCENARIOS.index("combined_supported")); controller = st.selectbox("Controller", CONTROLLERS, index=CONTROLLERS.index("constrained"))
+        stop = st.number_input("Stop time (s)", min_value=1.0, value=2700.0, step=60.0); step = st.number_input("Communication step (s)", min_value=0.01, value=0.5, step=0.1, format="%.2f"); fault = st.number_input("Fault injection time (s)", min_value=0.0, value=350.0, step=30.0)
+        basyx = st.toggle("Enable BaSyx AAS synchronization"); host = st.text_input("AAS environment URL", "http://localhost:8081", disabled=not basyx); period = st.number_input("BaSyx synchronization period (s)", min_value=0.1, value=10.0, step=0.5, disabled=not basyx)
+        output_name = f"{scenario}_{controller}_{stop:g}s_{uuid4().hex[:8]}{'_basyx' if basyx else ''}.csv"; st.caption(f"Output: results/manual/{output_name}")
+        if st.button("Run experiment", type="primary"):
+            command = [sys.executable, "-m", "experiments.experiment_runner", "--fmu", str(DEFAULT_FMU), "--scenario", scenario, "--controller", controller, "--stop", str(stop), "--step", str(step), "--fault-time", str(fault), "--output", str(RESULTS_ROOT / "manual" / output_name)]
             if basyx: command += ["--basyx", "--basyx-host", host, "--basyx-period", str(period)]
-            if run_command(command, "Experiment"): st.session_state.selected_result = str(RESULTS_ROOT / output_name); st.rerun()
-        st.divider(); st.header("Comparison launcher")
-        input_dir = st.text_input("Results directory", str(RESULTS_ROOT)); compare_name = st.text_input("Comparison filename", "ui_comparison.csv")
-        if st.button("▦ Compare evaluations", use_container_width=True):
-            output = Path(input_dir) / compare_name
-            if run_command([sys.executable, "-m", "analysis.compare_evaluation", "--input-dir", input_dir, "--output", str(output)], "Comparison"): st.session_state.selected_result = str(output); st.rerun()
+            if run_command(command, "Experiment"): st.session_state.selected_result = str(RESULTS_ROOT / "manual" / output_name); st.rerun()
+        st.divider(); st.header("Research campaign")
+        campaign_basyx = st.toggle("Measure BaSyx in one campaign case")
+        if st.button("Run complete 33-case campaign"):
+            command = [sys.executable, "-m", "experiments.run_research_evaluation"]
+            if campaign_basyx: command.append("--with-basyx")
+            run_command(command, "Research campaign")
     files = result_files(); mapping = {str(file.relative_to(PROJECT_ROOT)): file for file in files}
     label = st.selectbox("Open a result", list(mapping) or ["No CSV results found"]); path = mapping.get(label)
     if st.session_state.selected_result and Path(st.session_state.selected_result).exists(): path = Path(st.session_state.selected_result); st.session_state.selected_result = None
@@ -135,15 +143,15 @@ def main() -> None:
     motor_tab, plot_tab, table_tab, download_tab = st.tabs(["Motor view", "Plots", "Structured results", "Downloads"])
     with motor_tab: show_motor(dataframe)
     with plot_tab:
-        signals = [column for column in ["T_winding_C", "T_frame_C", "T_sensor_C", "speed_rpm", "P_electrical_W", "vibration_mm_s_out", "u_load_torque_pu"] if column in dataframe.columns]
+        signals = [column for column in ["T_winding_C", "T_frame_C", "T_sensor_C", "estimated_winding_C", "predicted_30s_C", "predicted_60s_C", "speed_rpm", "P_electrical_W", "u_load_torque_pu"] if column in dataframe.columns]
         if "time_s" in dataframe and signals:
             chosen = st.multiselect("Signals", signals, default=signals[:3])
             if chosen: st.line_chart(dataframe.set_index("time_s")[chosen], height=420)
         else: st.info("This comparison table has no time-series signals to plot.")
     with table_tab:
         if {"scenario", "controller", "run_variant"}.issubset(dataframe.columns):
-            columns = [column for column in ["scenario", "controller", "run_variant", "duration_s", "max_winding_temp_C", "time_above_100C_s", "electrical_energy_kWh", "basyx_end_to_end_loop_mean_latency_ms", "basyx_absolute_overhead_mean_ms"] if column in dataframe.columns]; st.dataframe(dataframe[columns], use_container_width=True, hide_index=True)
-        else: st.dataframe(dataframe, use_container_width=True, hide_index=True, height=420)
+            columns = [column for column in ["scenario", "controller", "status", "return_code", "max_winding_temperature_C", "time_above_critical_s", "electrical_energy_kWh", "mean_controller_derating_fraction", "real_time_factor"] if column in dataframe.columns]; st.dataframe(dataframe[columns], hide_index=True)
+        else: st.dataframe(dataframe, hide_index=True, height=420)
     with download_tab: st.caption("Download the currently displayed table."); download_buttons(dataframe, path.stem)
 
 

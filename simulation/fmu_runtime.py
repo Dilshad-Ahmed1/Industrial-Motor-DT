@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import time
 from pathlib import Path
@@ -22,7 +23,6 @@ OPTIONAL_INPUTS = [
     "f_sensor_freeze",
     "f_cooling_eff",
     "f_rth_degradation",
-    "f_unbalance_severity",
     "u_ambient_C",
     "f_load_overload_pu",
     "f_mechanical_friction_factor",
@@ -43,7 +43,6 @@ OUTPUTS = [
     "P_shaft_W",
     "P_loss_total_W",
     "I_rms_A",
-    "vibration_mm_s_out",
     "thermal_margin_to_critical_K",
     "thermal_state",
 ]
@@ -64,7 +63,6 @@ OPTIONAL_OUTPUTS = [
     "line_voltage_rms_V",
     "voltage_unbalance_percent",
     "cooling_effectiveness",
-    "mechanical_unbalance_supported",
 ]
 
 _OPTIONAL_INPUT_DEFAULTS: dict[str, Any] = {
@@ -72,7 +70,6 @@ _OPTIONAL_INPUT_DEFAULTS: dict[str, Any] = {
     "f_sensor_freeze": False,
     "f_cooling_eff": 1.0,
     "f_rth_degradation": 1.0,
-    "f_unbalance_severity": 0.0,
     "u_ambient_C": 20.0,
     "f_load_overload_pu": 0.0,
     "f_mechanical_friction_factor": 1.0,
@@ -83,7 +80,8 @@ _OPTIONAL_INPUT_DEFAULTS: dict[str, Any] = {
 
 # OpenModelica 1.27.1's exported CVODE FMU fails above this interval during
 # the load transient; larger Digital Twin cycles are subdivided.
-_INDUCTION_MAX_COMMUNICATION_STEP_S = 0.1
+_MAX_COMMUNICATION_STEP_S = 0.1
+_SUPPORTED_MODEL_NAME = "MotorDigitalTwin.InductionMotorDigitalTwin18kW"
 
 
 class FMURuntime:
@@ -101,6 +99,11 @@ class FMURuntime:
             raise RuntimeError(f"Expected FMI 2.0, got {self.md.fmiVersion}")
         if self.md.coSimulation is None:
             raise RuntimeError("FMU is not a Co-Simulation FMU.")
+        if self.md.modelName != _SUPPORTED_MODEL_NAME:
+            raise ValueError(
+                "Unsupported FMU model. This Digital Twin supports only "
+                f"{_SUPPORTED_MODEL_NAME!r}; received {self.md.modelName!r}."
+            )
 
         by_name = {v.name: v for v in self.md.modelVariables}
         missing = [n for n in INPUTS + OUTPUTS if n not in by_name]
@@ -117,12 +120,6 @@ class FMURuntime:
             for n in OUTPUTS + OPTIONAL_OUTPUTS
             if n in by_name
         }
-        self.plant_profile = (
-            "induction"
-            if "InductionMotorDigitalTwin18kW" in self.md.modelName
-            else "legacy"
-        )
-
         self.in_vr = {n: v.valueReference for n, v in self.in_var.items()}
         self.out_vr = {n: v.valueReference for n, v in self.out_var.items()}
 
@@ -184,6 +181,15 @@ class FMURuntime:
                 "Active plant inputs are unsupported by this FMU: "
                 f"{unsupported}"
             )
+        invalid_reals = {
+            name: value
+            for name, value in inputs.items()
+            if name in self.in_var
+            and self._kind(self.in_var[name]) == "real"
+            and not math.isfinite(float(value))
+        }
+        if invalid_reals:
+            raise ValueError(f"Non-finite FMU inputs are invalid: {invalid_reals}")
 
         real_vr: list[int] = []
         real_val: list[float] = []
@@ -258,6 +264,16 @@ class FMURuntime:
             for name, val in zip(bool_names, vals):
                 result[name] = float(1.0 if val else 0.0)
 
+        non_finite = {
+            name: value
+            for name, value in result.items()
+            if not math.isfinite(value)
+        }
+        if non_finite:
+            raise FloatingPointError(
+                f"FMU returned non-finite output values: {non_finite}"
+            )
+
         return result
 
     def supports_input(self, name: str) -> bool:
@@ -280,11 +296,7 @@ class FMURuntime:
 
         t0 = time.perf_counter()
         end_time = self.current_time + step_size
-        max_step_size = (
-            _INDUCTION_MAX_COMMUNICATION_STEP_S
-            if self.plant_profile == "induction"
-            else step_size
-        )
+        max_step_size = _MAX_COMMUNICATION_STEP_S
         while self.current_time < end_time - 1e-12:
             communication_step = min(
                 max_step_size,
@@ -348,7 +360,6 @@ def run(
                 "f_sensor_freeze": False,
                 "f_cooling_eff": 0.40 if fault_on else 1.0,
                 "f_rth_degradation": 1.0,
-                "f_unbalance_severity": 0.75 if fault_on else 0.0,
             }
             actual_step = min(step, stop_time - runtime.current_time)
             values, solver_time = runtime.step(actual_step, inputs)

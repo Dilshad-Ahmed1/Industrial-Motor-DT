@@ -25,7 +25,7 @@ from simulation.fmu_runtime import FMURuntime
 from twin.fault_detector import FaultDetector
 from twin.fault_severity import estimate_fault_severity
 from twin.predictor import ThermalPredictor
-from twin.state_estimator import ThermalStateEstimator
+from twin.state_estimator import StateEstimate, ThermalStateEstimator
 from analysis.basyx_metrics import BaSyxEvaluationMetrics
 
 
@@ -39,13 +39,11 @@ class Scenario:
     sensor_freeze: bool = False
     cooling_efficiency: float = 1.0
     rth_degradation: float = 1.0
-    unbalance_severity: float = 0.0
     load_overload_pu: float = 0.0
     mechanical_friction_factor: float = 1.0
     voltage_unbalance_pu: float = 0.0
     supply_voltage_degradation_pu: float = 0.0
     supply_frequency_deviation_pu: float = 0.0
-    truth_severity: float = 0.0
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -53,59 +51,38 @@ SCENARIOS: dict[str, Scenario] = {
 
     "sensor_bias": Scenario(
         sensor_bias_C=10.0,
-        truth_severity=1.0,
     ),
 
     "sensor_freeze": Scenario(
         sensor_freeze=True,
-        truth_severity=1.0,
     ),
 
     "cooling": Scenario(
         cooling_efficiency=0.40,
-        truth_severity=0.60,
     ),
 
     "rth_degradation": Scenario(
         rth_degradation=2.0,
-        truth_severity=0.50,
-    ),
-
-    "unbalance": Scenario(
-        unbalance_severity=0.75,
-        truth_severity=0.75,
-    ),
-
-    "combined": Scenario(
-        sensor_bias_C=10.0,
-        cooling_efficiency=0.40,
-        unbalance_severity=0.75,
-        truth_severity=1.0,
     ),
 
     "overload": Scenario(
         load_overload_pu=0.20,
-        truth_severity=0.40,
     ),
 
     "mechanical_friction": Scenario(
         mechanical_friction_factor=2.0,
-        truth_severity=0.50,
     ),
 
     "voltage_imbalance": Scenario(
         voltage_unbalance_pu=0.03,
-        truth_severity=0.60,
     ),
 
     "supply_degradation": Scenario(
         supply_voltage_degradation_pu=0.10,
-        truth_severity=0.50,
     ),
 
     "frequency_deviation": Scenario(
         supply_frequency_deviation_pu=0.02,
-        truth_severity=0.40,
     ),
 
     "combined_supported": Scenario(
@@ -113,7 +90,6 @@ SCENARIOS: dict[str, Scenario] = {
         cooling_efficiency=0.60,
         load_overload_pu=0.10,
         supply_voltage_degradation_pu=0.05,
-        truth_severity=0.80,
     ),
 }
 
@@ -123,18 +99,13 @@ SCENARIOS: dict[str, Scenario] = {
 # ---------------------------------------------------------------------------
 
 def load_project_config() -> dict[str, Any]:
-    """
-    Load project configuration if available.
-
-    The experiment remains runnable even if the YAML file does not exist.
-    """
+    """Load the required motor Digital Twin configuration."""
     path = Path("config/twin_config.yaml")
-
-    if not path.exists():
-        return {}
-
     with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        config = yaml.safe_load(f)
+    if not isinstance(config, dict):
+        raise ValueError(f"Invalid project configuration: {path}")
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +128,6 @@ def _fault_inputs(
             "f_sensor_freeze": False,
             "f_cooling_eff": 1.0,
             "f_rth_degradation": 1.0,
-            "f_unbalance_severity": 0.0,
             "f_load_overload_pu": 0.0,
             "f_mechanical_friction_factor": 1.0,
             "f_voltage_unbalance_pu": 0.0,
@@ -170,7 +140,6 @@ def _fault_inputs(
         "f_sensor_freeze": scenario.sensor_freeze,
         "f_cooling_eff": scenario.cooling_efficiency,
         "f_rth_degradation": scenario.rth_degradation,
-        "f_unbalance_severity": scenario.unbalance_severity,
         "f_load_overload_pu": scenario.load_overload_pu,
         "f_mechanical_friction_factor": scenario.mechanical_friction_factor,
         "f_voltage_unbalance_pu": scenario.voltage_unbalance_pu,
@@ -183,26 +152,8 @@ def _fault_inputs(
     }
 
 
-def _identify_plant_profile(
-    fmu_path: Path,
-    requested_profile: str,
-) -> str:
-    if requested_profile not in {"auto", "legacy", "induction"}:
-        raise ValueError(f"Unknown plant profile: {requested_profile}")
-    if requested_profile != "auto":
-        return requested_profile
-
-    model_name = str(read_model_description(str(fmu_path)).modelName)
-    return (
-        "induction"
-        if "InductionMotorDigitalTwin18kW" in model_name
-        else "legacy"
-    )
-
-
 def _adapt_measurement(
     measurement: dict[str, float],
-    plant_profile: str,
     rated_current_A: float,
     rated_voltage_V: float,
     rated_frequency_Hz: float,
@@ -213,6 +164,36 @@ def _adapt_measurement(
     ambient_C: float,
     winding_loss_fraction: float,
 ) -> dict[str, float]:
+    required_signals = (
+        "T_winding_C",
+        "T_frame_C",
+        "T_sensor_C",
+        "T_ambient_C",
+        "omega_rad_s",
+        "speed_rpm",
+        "torque_load_Nm",
+        "torque_motor_Nm",
+        "P_electrical_W",
+        "P_shaft_W",
+        "P_loss_total_W",
+        "I_rms_A",
+    )
+    missing = sorted(set(required_signals) - measurement.keys())
+    if missing:
+        raise KeyError(f"FMU measurement is missing required signals: {missing}")
+    invalid = {
+        name: measurement[name]
+        for name in required_signals
+        if not math.isfinite(float(measurement[name]))
+    }
+    if invalid:
+        raise ValueError(f"FMU measurement has non-finite signals: {invalid}")
+    if float(measurement["I_rms_A"]) < 0.0:
+        raise ValueError("FMU RMS current cannot be negative.")
+    for name in ("T_winding_C", "T_frame_C", "T_sensor_C", "T_ambient_C"):
+        if float(measurement[name]) <= -273.15:
+            raise ValueError(f"FMU temperature {name} is below absolute zero.")
+
     adapted = dict(measurement)
     adapted.setdefault("T_ambient_C", ambient_C)
     adapted.setdefault("supply_frequency_Hz", rated_frequency_Hz)
@@ -229,10 +210,6 @@ def _adapt_measurement(
         2.0 * math.pi * rated_speed_rpm / 60.0,
     )
     adapted.setdefault("rated_efficiency", rated_efficiency)
-    adapted.setdefault(
-        "mechanical_unbalance_supported",
-        plant_profile == "legacy",
-    )
     adapted.setdefault(
         "current_pu",
         float(adapted["I_rms_A"]) / max(rated_current_A, 1e-9),
@@ -251,70 +228,59 @@ def _adapt_measurement(
         float(adapted["P_motor_losses_W"])
         - float(adapted["P_winding_losses_W"]),
     )
-    if plant_profile == "induction":
-        for name in (
-            "P_motor_losses_W",
-            "P_winding_losses_W",
-            "P_fixed_losses_W",
-            "P_loss_total_W",
-        ):
-            if name in adapted:
-                adapted[f"truth_{name}"] = float(adapted[name])
+    for name in (
+        "P_motor_losses_W",
+        "P_winding_losses_W",
+        "P_fixed_losses_W",
+        "P_loss_total_W",
+    ):
+        if name in adapted:
+            adapted[f"truth_{name}"] = float(adapted[name])
 
-        observed_loss_W = max(
-            0.0,
-            float(adapted["P_electrical_W"])
-            - float(adapted["P_shaft_W"]),
-        )
-        adapted["observed_power_loss_W"] = observed_loss_W
+    observed_loss_W = max(
+        0.0,
+        float(adapted["P_electrical_W"])
+        - float(adapted["P_shaft_W"]),
+    )
+    adapted["observed_power_loss_W"] = observed_loss_W
 
-        # Component losses are estimates apportioned from measured input and
-        # shaft power; hidden MSL loss channels remain available only as truth.
-        adapted["P_motor_losses_W"] = observed_loss_W
-        adapted["P_winding_losses_W"] = (
-            observed_loss_W * winding_loss_fraction
-        )
-        adapted["P_fixed_losses_W"] = (
-            observed_loss_W * (1.0 - winding_loss_fraction)
-        )
-        adapted["expected_loss_estimate_W"] = max(
-            0.0,
-            rated_output_W * (1.0 / max(rated_efficiency, 1e-6) - 1.0)
+    # The observer receives a power-balance loss estimate, never exact MSL
+    # component-loss outputs.
+    adapted["P_motor_losses_W"] = observed_loss_W
+    adapted["P_winding_losses_W"] = (
+        observed_loss_W * winding_loss_fraction
+    )
+    adapted["P_fixed_losses_W"] = (
+        observed_loss_W * (1.0 - winding_loss_fraction)
+    )
+    adapted["expected_loss_estimate_W"] = max(
+        0.0,
+        rated_output_W * (1.0 / max(rated_efficiency, 1e-6) - 1.0)
+        * (
+            winding_loss_fraction
             * (
-                winding_loss_fraction
-                * (
-                    float(adapted["I_rms_A"])
-                    / max(rated_current_A, 1e-9)
-                ) ** 2
-                + (1.0 - winding_loss_fraction)
-                * (
-                    abs(float(adapted["speed_rpm"]))
-                    / max(rated_speed_rpm, 1e-9)
-                ) ** 2
-            ),
-        )
-        adapted["cooling_severity_scale_C"] = 0.10
+                float(adapted["I_rms_A"])
+                / max(rated_current_A, 1e-9)
+            ) ** 2
+            + (1.0 - winding_loss_fraction)
+            * (
+                abs(float(adapted["speed_rpm"]))
+                / max(rated_speed_rpm, 1e-9)
+            ) ** 2
+        ),
+    )
+    adapted["cooling_severity_scale_C"] = 0.10
     adapted["friction_excess_estimate_W"] = max(
         0.0,
-        (
-            float(adapted["observed_power_loss_W"])
-            - float(adapted["expected_loss_estimate_W"])
-            if plant_profile == "induction"
-            else float(adapted["P_electrical_W"])
-            - float(adapted["P_shaft_W"])
-            - float(adapted["P_motor_losses_W"])
-        ),
+        float(adapted["observed_power_loss_W"])
+        - float(adapted["expected_loss_estimate_W"]),
     )
     return adapted
 
 
 def _digital_twin_measurement(
     measurement: dict[str, float],
-    plant_profile: str,
 ) -> dict[str, float]:
-    if plant_profile != "induction":
-        return measurement
-
     observable = {
         name: value
         for name, value in measurement.items()
@@ -324,8 +290,11 @@ def _digital_twin_measurement(
             "P_loss_total_W",
             "T_winding_C",
             "T_winding_K",
+            "T_frame_K",
+            "T_ambient_K",
             "thermal_margin_to_critical_K",
             "thermal_state",
+            "cooling_effectiveness",
         }
     }
     observable["P_loss_total_W"] = float(
@@ -343,7 +312,6 @@ def _true_fault_severities(
             "sensor_bias": 0.0,
             "sensor_freeze": 0.0,
             "cooling": 0.0,
-            "unbalance": 0.0,
             "overload": 0.0,
             "mechanical_friction": 0.0,
             "voltage_imbalance": 0.0,
@@ -353,8 +321,13 @@ def _true_fault_severities(
     return {
         "sensor_bias": min(abs(scenario.sensor_bias_C) / 10.0, 1.0),
         "sensor_freeze": float(scenario.sensor_freeze),
-        "cooling": max(0.0, 1.0-scenario.cooling_efficiency),
-        "unbalance": scenario.unbalance_severity,
+        "cooling": min(
+            1.0,
+            max(
+                0.0,
+                1.0-scenario.cooling_efficiency/scenario.rth_degradation,
+            ),
+        ),
         "overload": min(scenario.load_overload_pu / 0.5, 1.0),
         "mechanical_friction": min(
             max(0.0, scenario.mechanical_friction_factor-1.0), 1.0
@@ -376,7 +349,9 @@ def _true_fault_severities(
 REQUIRED_LOG_COLUMNS = {
     # Time / experiment
     "time_s",
+    "sample_interval_s",
     "fault_active",
+    "fault_input_active_for_next_interval",
     "fault_type",
     "fault_severity_true",
     "controller",
@@ -402,15 +377,19 @@ REQUIRED_LOG_COLUMNS = {
     # Fault detection
     "fault_sensor_bias_detected",
     "fault_cooling_detected",
-    "fault_unbalance_detected",
     "fault_alarm",
     "primary_fault",
 
     # Fault severity
     "fault_severity_sensor_bias",
     "fault_severity_cooling",
-    "fault_severity_unbalance",
     "fault_severity_estimated",
+    "fault_sensor_freeze_detected",
+    "fault_overload_detected",
+    "fault_mechanical_friction_detected",
+    "fault_supply_degradation_detected",
+    "fault_voltage_imbalance_detected",
+    "fault_frequency_deviation_detected",
 
     # Prediction
     "predicted_30s_C",
@@ -428,6 +407,11 @@ REQUIRED_LOG_COLUMNS = {
     "T_winding_C",
     "T_frame_C",
     "T_sensor_C",
+    "estimated_winding_C",
+    "estimated_frame_C",
+    "controller_derating_fraction",
+    "controller_operating_mode",
+    "thermal_warning_detected",
     "omega_rad_s",
     "speed_rpm",
     "torque_load_Nm",
@@ -436,7 +420,6 @@ REQUIRED_LOG_COLUMNS = {
     "P_shaft_W",
     "P_loss_total_W",
     "I_rms_A",
-    "vibration_mm_s_out",
     "thermal_margin_to_critical_K",
     "thermal_state",
 }
@@ -470,10 +453,10 @@ def build_basyx_snapshot(
     fault_active: bool,
     true_fault_severities: dict[str, float],
     controller_name: str,
-    plant_profile: str,
     simulation_time_s: float,
     snapshot_timestamp_utc: str,
     snapshot_id: str,
+    controller_operating_mode: str,
     critical_temperature_C: float = 120.0,
 ) -> dict[str, dict[str, object]]:
     """
@@ -507,12 +490,6 @@ def build_basyx_snapshot(
     )
     true_fault_severity = max(true_fault_severities.values(), default=0.0)
     load_pu = float(command.load_pu)
-    if load_pu >= 0.99:
-        operating_mode = "NORMAL"
-    elif load_pu > 0.60:
-        operating_mode = "ADAPTIVE_DERATE"
-    else:
-        operating_mode = "PROTECTIVE"
 
     # --------------------------------------------------------------
     # Operational
@@ -528,15 +505,15 @@ def build_basyx_snapshot(
                 measurement[
                     "torque_load_Nm"
                 ]
-            ) / max(float(measurement.get("rated_torque_Nm", 35.973378)), 1e-9)
+            ) / max(float(measurement.get("rated_torque_Nm", 120.794521)), 1e-9)
         ),
-        "PowerLossActualW": float(
+        "ObservedPowerBalanceLossW": float(
             measurement["observed_power_loss_W"]
             if "observed_power_loss_W" in measurement
             else measurement["P_loss_total_W"]
         ),
-        "PlantProfile": plant_profile,
-        "MotorRatedOutputW": float(measurement.get("rated_output_W", 5500.0)),
+        "PlantProfile": "MSL_IM_SquirrelCage_18.5kW",
+        "MotorRatedOutputW": float(measurement.get("rated_output_W", 18500.0)),
     }
 
     # --------------------------------------------------------------
@@ -550,7 +527,7 @@ def build_basyx_snapshot(
             measurement["I_rms_A"]
         ),
 
-        "PowerFactor": float(measurement.get("power_factor", 0.81)),
+        "PowerFactor": float(measurement.get("power_factor", 0.898)),
 
         "ActivePowerW": float(
             measurement[
@@ -571,7 +548,7 @@ def build_basyx_snapshot(
             measurement.get("rated_voltage_line_line_V", 400.0)
         ),
         "RatedCurrentRmsA": float(
-            measurement.get("rated_current_A", 10.9)
+            measurement.get("rated_current_A", 32.85)
         ),
         "Efficiency": (
             float(measurement["P_shaft_W"])
@@ -606,18 +583,6 @@ def build_basyx_snapshot(
             useful_work_kwh
         ),
 
-        "VibrationAmplitudeMmS": float(
-            measurement[
-                "vibration_mm_s_out"
-            ]
-        ),
-
-        # Estimated—not hidden truth.
-        "UnbalanceSeverity": float(
-            severity[
-                "mechanical_unbalance"
-            ]
-        ),
         "SynchronousSpeedRpm": synchronous_speed_rpm,
         "SlipPercent": slip_percent,
         "LoadCommandTorqueNm": (
@@ -692,10 +657,6 @@ def build_basyx_snapshot(
             ),
         ),
 
-        "MechanicalUnbalanceActive": bool(
-            detection.mechanical_unbalance
-        ),
-
         "EstimatedFaultSeverity": float(
             severity["overall"]
         ),
@@ -728,7 +689,7 @@ def build_basyx_snapshot(
 
         "LoadDeratingCommandPu": load_pu,
 
-        "OperatingMode": operating_mode,
+        "OperatingMode": controller_operating_mode,
         "ControllerName": controller_name,
     }
 
@@ -763,7 +724,6 @@ def run_experiment(
     basyx_host: str = "http://localhost:8081",
     basyx_period_s: float = 2.0,
     realtime: bool = False,
-    plant_profile: str = "auto",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
 
     # -------------------------
@@ -786,11 +746,24 @@ def run_experiment(
     if step <= 0:
         raise ValueError("step must be > 0")
 
-    if fault_time < 0:
-        raise ValueError("fault_time must be >= 0")
+    if not 0.0 <= fault_time <= stop_time:
+        raise ValueError("fault_time must be within [0, stop_time]")
+    if basyx_period_s <= 0.0:
+        raise ValueError("basyx_period_s must be > 0")
 
     fmu_path = Path(fmu_path).resolve()
-    plant_profile = _identify_plant_profile(fmu_path, plant_profile)
+    if not fmu_path.is_file():
+        raise FileNotFoundError(f"Induction-motor FMU not found: {fmu_path}")
+    model_name = read_model_description(str(fmu_path)).modelName
+    if model_name != "MotorDigitalTwin.InductionMotorDigitalTwin18kW":
+        raise ValueError(
+            "This experiment runner supports only the MSL 18.5 kW "
+            f"induction motor; received FMU model {model_name!r}."
+        )
+    if Path(output).resolve().exists():
+        raise FileExistsError(
+            f"Refusing to overwrite experiment output: {Path(output).resolve()}"
+        )
 
     # -------------------------
     # Configuration
@@ -798,132 +771,61 @@ def run_experiment(
 
     cfg = load_project_config()
 
-    induction_cfg = cfg.get("induction_motor_digital_twin", {})
-    if plant_profile == "induction" and not induction_cfg:
-        raise ValueError(
-            "Induction-motor FMU selected, but "
-            "config/twin_config.yaml has no "
-            "'induction_motor_digital_twin' profile."
-        )
-    safety_cfg = (
-        induction_cfg.get("safety", {})
-        if plant_profile == "induction"
-        else cfg.get("safety", {})
-    )
-    thermal_cfg = (
-        induction_cfg
-        if plant_profile == "induction"
-        else cfg.get("thermal_model", {})
-    )
-    motor_cfg = cfg.get("motor", {})
+    induction_cfg = cfg["induction_motor_digital_twin"]
+    safety_cfg = induction_cfg["safety"]
+    ambient_C = float(induction_cfg["ambient_temperature_C"])
+    rwf = float(induction_cfg["winding_frame_Rth_K_per_W"])
+    rfa = float(induction_cfg["frame_ambient_Rth_K_per_W"])
+    cw = float(induction_cfg["winding_thermal_capacitance_J_per_K"])
+    cf = float(induction_cfg["frame_thermal_capacitance_J_per_K"])
+    rated_speed_rpm = float(induction_cfg["rated_speed_rpm"])
+    rated_current_A = float(induction_cfg["rated_current_A"])
+    rated_voltage_V = float(induction_cfg["rated_voltage_line_line_V"])
+    rated_frequency_Hz = float(induction_cfg["frequency_Hz"])
+    rated_output_W = float(induction_cfg["rated_output_W"])
+    rated_efficiency = float(induction_cfg["rated_efficiency"])
+    rated_torque_Nm = float(induction_cfg["rated_torque_Nm"])
+    winding_loss_fraction = float(induction_cfg["winding_loss_fraction"])
+    cooling_flow_offset = float(induction_cfg["cooling_flow_offset"])
+    cooling_flow_gain = float(induction_cfg["cooling_flow_gain"])
+    min_load = float(safety_cfg["minimum_load_pu"])
+    ref_load = float(safety_cfg["reference_load_pu"])
+    warning_C = float(safety_cfg["winding_warning_C"])
+    intervention_C = float(safety_cfg["winding_intervention_C"])
+    buffered_C = float(safety_cfg["winding_buffered_C"])
+    critical_C = float(safety_cfg["winding_critical_C"])
+    rated_omega_rad_s = 2.0 * math.pi * rated_speed_rpm / 60.0
+    controller_cfg = induction_cfg["controllers"]
 
-    min_load = float(
-        safety_cfg.get("minimum_load_pu", 0.50)
-    )
-
-    ref_load = float(
-        safety_cfg.get("reference_load_pu", 1.00)
-    )
-
-    warning_C = float(
-        safety_cfg.get("winding_warning_C", 100.0)
-    )
-
-    critical_C = float(
-        safety_cfg.get("winding_critical_C", 120.0)
-    )
-
-    vib_warning = float(
-        safety_cfg.get("vibration_warning_mm_s", 2.8)
-    )
-
-    ambient_C = float(
-        thermal_cfg.get("ambient_temperature_C", 25.0)
-    )
-
-    rwf = float(
-        thermal_cfg.get("winding_frame_Rth_K_per_W", 0.0400)
-    )
-
-    rfa = float(
-        thermal_cfg.get("frame_ambient_Rth_K_per_W", 0.086672)
-    )
-
-    cw = float(
-        thermal_cfg.get("winding_thermal_capacitance_J_per_K", 1500.0)
-    )
-
-    cf = float(
-        thermal_cfg.get("frame_thermal_capacitance_J_per_K", 9000.0)
-    )
-
-    rated_speed_rpm = float(
-        induction_cfg.get("rated_speed_rpm", 1462.5)
-        if plant_profile == "induction"
-        else motor_cfg.get("rated_speed_rpm", 1460.0)
-    )
-    rated_current_A = float(
-        induction_cfg.get("rated_current_A", 32.85)
-        if plant_profile == "induction"
-        else cfg.get("reference_motor", {})
-        .get("published", {})
-        .get("rated_current_A_at_400V", 10.9)
-    )
-    rated_voltage_V = float(
-        induction_cfg.get("rated_voltage_line_line_V", 400.0)
-        if plant_profile == "induction"
-        else cfg.get("reference_motor", {})
-        .get("published", {})
-        .get("rated_voltage_line_line_V", 400.0)
-    )
-    rated_frequency_Hz = float(
-        induction_cfg.get("frequency_Hz", 50.0)
-        if plant_profile == "induction"
-        else cfg.get("reference_motor", {})
-        .get("published", {})
-        .get("rated_frequency_Hz", 50.0)
-    )
-    rated_output_W = float(
-        induction_cfg.get("rated_output_W", 18500.0)
-        if plant_profile == "induction"
-        else cfg.get("reference_motor", {})
-        .get("published", {})
-        .get("rated_output_W", 5500.0)
-    )
-    rated_efficiency = float(
-        induction_cfg.get("rated_efficiency", 0.9049)
-        if plant_profile == "induction"
-        else cfg.get("reference_motor", {})
-        .get("published", {})
-        .get("efficiency_percent_at_100pct_load", 89.7) / 100.0
-    )
-    rated_torque_Nm = float(
-        induction_cfg.get("rated_torque_Nm", 120.794521)
-        if plant_profile == "induction"
-        else motor_cfg.get("rated_torque_Nm", 35.973378)
-    )
-    winding_loss_fraction = float(
-        induction_cfg.get("winding_loss_fraction", 0.644)
-        if plant_profile == "induction"
-        else thermal_cfg.get("winding_loss_fraction", 0.60)
-    )
-    cooling_flow_offset = float(
-        induction_cfg.get("cooling_flow_offset", 0.0)
-        if plant_profile == "induction"
-        else 0.10
-    )
-    cooling_flow_gain = float(
-        induction_cfg.get("cooling_flow_gain", 1.0)
-        if plant_profile == "induction"
-        else 0.90
-    )
-
-    rated_omega_rad_s = (
-        2.0
-        * math.pi
-        * rated_speed_rpm
-        / 60.0
-    )
+    baseline_settings = {
+        "minimum_load_pu": min_load,
+        "reference_load_pu": ref_load,
+        **controller_cfg["baseline"],
+    }
+    adaptive_settings = {
+        "minimum_load_pu": min_load,
+        "reference_load_pu": ref_load,
+        **controller_cfg["adaptive"],
+    }
+    constrained_settings = {
+        "critical_temperature_C": critical_C,
+        "warning_temperature_C": warning_C,
+        "intervention_temperature_C": intervention_C,
+        "minimum_load_pu": float(safety_cfg["controller_minimum_load_pu"]),
+        "maximum_load_pu": float(safety_cfg["maximum_load_pu"]),
+        "minimum_cooling_pu": float(safety_cfg["minimum_cooling_pu"]),
+        "maximum_cooling_pu": float(safety_cfg["maximum_cooling_pu"]),
+        "safety_buffer_C": float(safety_cfg["safety_buffer_C"]),
+        **controller_cfg["constrained"],
+    }
+    detector_settings = {
+        **controller_cfg["fault_detector"],
+        "cooling_residual_threshold_C": float(
+            induction_cfg["cooling_residual_threshold_C"]
+        ),
+        "cooling_clear_C": float(induction_cfg["cooling_residual_clear_C"]),
+        "estimated_temp_warning_C": warning_C,
+    }
 
     scenario = SCENARIOS[scenario_name]
 
@@ -939,66 +841,26 @@ def run_experiment(
         c_frame_J_K=cf,
         winding_loss_fraction=winding_loss_fraction,
         fixed_loss_fraction=1.0-winding_loss_fraction,
-        initial_winding_C=(
-            float(induction_cfg.get("initial_winding_C", 90.0))
-            if plant_profile == "induction"
-            else 30.0
-        ),
-        initial_frame_C=(
-            float(induction_cfg.get("initial_frame_C", 77.4827))
-            if plant_profile == "induction"
-            else 27.0
-        ),
+        initial_winding_C=float(induction_cfg["initial_winding_C"]),
+        initial_frame_C=float(induction_cfg["initial_frame_C"]),
         cooling_flow_offset=cooling_flow_offset,
         cooling_flow_gain=cooling_flow_gain,
     )
 
     predictor = ThermalPredictor(estimator)
 
-    detector = FaultDetector(
-        sensor_bias_threshold_C=6.0,
-        cooling_residual_threshold_C=float(
-            induction_cfg.get("cooling_residual_threshold_C", 0.02)
-            if plant_profile == "induction"
-            else 5.0
-        ),
-        cooling_clear_C=float(
-            induction_cfg.get("cooling_residual_clear_C", 0.015)
-            if plant_profile == "induction"
-            else 1.5
-        ),
-        vibration_warning_mm_s=vib_warning,
-        estimated_temp_warning_C=warning_C,
-    )
+    detector = FaultDetector(**detector_settings)
 
-    baseline = BaselineThresholdController(
-        min_load,
-        ref_load,
-        warning_C,
-        critical_C,
-    )
+    baseline = BaselineThresholdController(**baseline_settings)
 
-    adaptive = FaultAwareAdaptiveController(
-        min_load,
-        ref_load,
-        warning_C,
-        critical_C,
-    )
+    adaptive = FaultAwareAdaptiveController(**adaptive_settings)
 
     # New safety-constrained predictive controller.
     from control.constrained_adaptive_controller import (
         ConstrainedAdaptiveController,
     )
 
-    constrained = ConstrainedAdaptiveController(
-        critical_temperature_C=critical_C,
-        warning_temperature_C=warning_C,
-        minimum_load_pu=0.70,
-        maximum_load_pu=ref_load,
-        minimum_cooling_pu=0.50,
-        maximum_cooling_pu=1.00,
-        safety_buffer_C=5.0,
-    )
+    constrained = ConstrainedAdaptiveController(**constrained_settings)
 
     if controller_name == "baseline":
         controller = baseline
@@ -1056,22 +918,7 @@ def run_experiment(
     # FMU runtime
     # -------------------------
 
-    with FMURuntime(
-        fmu_path,
-        stop_time=stop_time,
-    ) as runtime:
-
-        if runtime.plant_profile != plant_profile:
-            raise RuntimeError(
-                f"FMU profile mismatch: selected {plant_profile!r}, "
-                f"runtime identified {runtime.plant_profile!r}."
-            )
-        if plant_profile == "induction" and scenario.unbalance_severity > 0:
-            raise ValueError(
-                "Mechanical unbalance is unsupported by the induction "
-                "plant's rotational-only mechanics; no radial vibration "
-                "fault is injected."
-            )
+    with FMURuntime(fmu_path, stop_time=stop_time) as runtime:
         active_fault_inputs = _fault_inputs(scenario, True)
         default_fault_inputs = _fault_inputs(Scenario(), True)
         unsupported_fault_inputs = {
@@ -1089,7 +936,6 @@ def run_experiment(
         # Initial healthy measurement at t = 0.
         measurement = _adapt_measurement(
             runtime.initialize(),
-            plant_profile,
             rated_current_A,
             rated_voltage_V,
             rated_frequency_Hz,
@@ -1103,7 +949,7 @@ def run_experiment(
 
         # Initialize the digital-twin observer.
         estimator.initialize_from_measurement(
-            _digital_twin_measurement(measurement, plant_profile)
+            _digital_twin_measurement(measurement)
         )
 
         # Initial command.
@@ -1130,14 +976,15 @@ def run_experiment(
         if realtime:
             realtime_wall_start = time.perf_counter()
 
+        fault_active_at_sample = False
+        previous_sample_interval_s: float | None = None
+
         while runtime.current_time < stop_time - 1e-12:
 
             # Current simulation instant.
             t = runtime.current_time
-            twin_measurement = _digital_twin_measurement(
-                measurement,
-                plant_profile,
-            )
+            actual_step = min(step, stop_time - t)
+            twin_measurement = _digital_twin_measurement(measurement)
 
             if realtime and realtime_wall_start is not None:
                 scheduled_start = realtime_wall_start + t
@@ -1149,7 +996,10 @@ def run_experiment(
                 cycle_wall_start = time.perf_counter()
 
             # Fault state is determined from simulation time.
-            fault_active = t >= fault_time
+            # The logged fault state describes the current FMU sample. The
+            # fault input below applies to the interval beginning at t.
+            fault_active = fault_active_at_sample
+            fault_input_active = t >= fault_time - 1e-12
 
             # -----------------------------------------------------------
             # 1. STATE ESTIMATION
@@ -1157,12 +1007,22 @@ def run_experiment(
 
             t0 = time.perf_counter()
 
-            estimate = estimator.update(
-                measurement=twin_measurement,
-                cooling_flow_pu=current_command.cooling_flow_pu,
-                dt_s=step,
-                cooling_effectiveness=estimated_cooling_efficiency,
-            )
+            if previous_sample_interval_s is None:
+                estimate = StateEstimate(
+                    estimated_winding_C=estimator.Tw_C,
+                    estimated_frame_C=estimator.Tf_C,
+                    estimated_winding_rate_C_s=0.0,
+                    sensor_residual_C=0.0,
+                    frame_innovation_C=0.0,
+                    frame_model_residual_C=0.0,
+                )
+            else:
+                estimate = estimator.update(
+                    measurement=twin_measurement,
+                    cooling_flow_pu=current_command.cooling_flow_pu,
+                    dt_s=previous_sample_interval_s,
+                    cooling_effectiveness=estimated_cooling_efficiency,
+                )
 
             estimator_latency_ms = (
                 time.perf_counter() - t0
@@ -1398,7 +1258,7 @@ def run_experiment(
 
             fault_inputs = _fault_inputs(
                 scenario,
-                fault_active,
+                fault_input_active,
             )
 
             inputs = {
@@ -1446,10 +1306,10 @@ def run_experiment(
                     fault_active=fault_active,
                     true_fault_severities=true_fault_severities,
                     controller_name=controller_name,
-                    plant_profile=plant_profile,
                     simulation_time_s=float(t),
                     snapshot_timestamp_utc=snapshot_timestamp_utc,
                     snapshot_id=snapshot_id,
+                    controller_operating_mode=controller_operating_mode,
                     critical_temperature_C=critical_C,
                 )
 
@@ -1497,11 +1357,6 @@ def run_experiment(
             # 7. ADVANCE FMU
             # -----------------------------------------------------------
 
-            actual_step = min(
-                step,
-                stop_time - t,
-            )
-
             elapsed_energy_kwh += (
                 max(
                     0.0,
@@ -1530,7 +1385,6 @@ def run_experiment(
             )
             post_measurement = _adapt_measurement(
                 raw_post_measurement,
-                plant_profile,
                 rated_current_A,
                 rated_voltage_V,
                 rated_frequency_Hz,
@@ -1601,13 +1455,18 @@ def run_experiment(
                 # -------------------------------------------------------
 
                 "time_s": t,
+                "sample_interval_s": actual_step,
 
                 "fault_active": fault_active,
+                "fault_input_active_for_next_interval": fault_input_active,
+                "thermal_warning_detected": bool(
+                    estimate.estimated_winding_C >= warning_C
+                ),
 
                 "fault_type": scenario_name,
 
                 # Ground truth is logged only for evaluation.
-                "plant_profile": plant_profile,
+                "motor_model": "MotorDigitalTwin.InductionMotorDigitalTwin18kW",
                 "fault_severity_true_sensor_bias": (
                     true_fault_severity["sensor_bias"]
                 ),
@@ -1616,9 +1475,6 @@ def run_experiment(
                 ),
                 "fault_severity_true_cooling": (
                     true_fault_severity["cooling"]
-                ),
-                "fault_severity_true_unbalance": (
-                    true_fault_severity["unbalance"]
                 ),
                 "fault_severity_true_overload": (
                     true_fault_severity["overload"]
@@ -1755,10 +1611,6 @@ def run_experiment(
                     detection.frequency_deviation
                 ),
 
-                "fault_unbalance_detected": bool(
-                    detection.mechanical_unbalance
-                ),
-
                 "fault_alarm": bool(
                     detection.alarm
                 ),
@@ -1780,9 +1632,6 @@ def run_experiment(
                 ),
                 "fault_severity_sensor_freeze": float(
                     severity["sensor_freeze"]
-                ),
-                "fault_severity_unbalance": float(
-                    severity["mechanical_unbalance"]
                 ),
                 "fault_severity_overload": float(
                     severity["load_overload"]
@@ -1874,6 +1723,8 @@ def run_experiment(
 
             current_command = next_command
             measurement = post_measurement
+            fault_active_at_sample = fault_input_active
+            previous_sample_interval_s = actual_step
 
         if realtime and realtime_wall_start is not None:
             realtime_wall_elapsed_s = (
@@ -1922,6 +1773,8 @@ def run_experiment(
         fault_injection_time_s=fault_time,
         safe_temp_threshold_c=critical_C,
         nominal_temp_c=warning_C,
+        intervention_temp_c=intervention_C,
+        buffered_temp_c=buffered_C,
     )
 
     if realtime and realtime_wall_start is not None:
@@ -2024,59 +1877,34 @@ def run_experiment(
         print(f"BaSyx detailed log           : {basyx_detail_csv}")
         print(f"BaSyx summary                : {basyx_summary_json}")
 
-    # Add constrained-controller metrics to the returned metric dictionary.
     metrics["controller"] = controller_name
+    metrics["controller_settings"] = {
+        "selected_controller": (
+            baseline_settings
+            if controller_name == "baseline"
+            else adaptive_settings
+            if controller_name == "adaptive"
+            else constrained_settings
+        ),
+        "fault_detector": detector_settings,
+    }
 
     if "controller_safety_margin_C" in df.columns:
         metrics["minimum_controller_safety_margin_C"] = float(
             df["controller_safety_margin_C"].min()
         )
-
         metrics["mean_controller_safety_margin_C"] = float(
-            df["controller_safety_margin_C"].mean()
+            (
+                df["controller_safety_margin_C"]
+                * df["sample_interval_s"]
+            ).sum()
+            / df["sample_interval_s"].sum()
         )
 
     if "controller_derating_fraction" in df.columns:
-        metrics["mean_controller_derating_fraction"] = float(
-            df["controller_derating_fraction"].mean()
-        )
-
         metrics["max_controller_derating_fraction"] = float(
             df["controller_derating_fraction"].max()
         )
-
-    if "controller_operating_mode" in df.columns:
-        metrics["emergency_fraction"] = float(
-            df["controller_operating_mode"]
-            .isin(
-                [
-                    "EMERGENCY",
-                    "EMERGENCY_DERATING",
-                ]
-            )
-            .mean()
-        )
-
-    metrics["maximum_winding_temperature_C"] = float(
-        df["T_winding_C"].max()
-    )
-    metrics["minimum_thermal_margin_C"] = float(
-        df["thermal_margin_to_critical_K"].min()
-    )
-    metrics["fault_severity_mae"] = float(
-        (df["fault_severity_estimated"] - df["fault_severity_true"])
-        .abs()
-        .mean()
-    )
-    post_fault_rows = df[df["time_s"] >= fault_time]
-    metrics["fault_severity_mae_post_fault"] = float(
-        (
-            post_fault_rows["fault_severity_estimated"]
-            - post_fault_rows["fault_severity_true"]
-        )
-        .abs()
-        .mean()
-    ) if not post_fault_rows.empty else float("nan")
 
     metrics_path = output.with_name(f"{output.stem}_metrics.json")
     with metrics_path.open("w", encoding="utf-8") as metrics_file:
@@ -2134,7 +1962,7 @@ def run_experiment(
 
     print(
         "State estimation MAE         : "
-        f"{metrics['state_estimation_mae_C']:.3f} °C"
+        f"{metrics['winding_estimation_mae_C']:.3f} °C"
     )
 
     print(
@@ -2156,8 +1984,12 @@ def run_experiment(
         f"{metrics['torque_command_rmse_Nm']:.6f} N·m"
     )
     print(
-        "Fault severity MAE           : "
-        f"{metrics['fault_severity_mae']:.6f}"
+        "Mean injected severity index  : "
+        f"{metrics['mean_injected_severity_index_post_fault']:.6f}"
+    )
+    print(
+        "Mean estimated anomaly score : "
+        f"{metrics['mean_estimated_anomaly_severity_score_post_fault']:.6f}"
     )
     print(
         "Minimum thermal margin       : "
@@ -2166,7 +1998,7 @@ def run_experiment(
 
     print(
         "Energy / useful work ratio    : "
-        f"{metrics['energy_to_useful_work_ratio']:.6f}"
+        f"{metrics['electrical_energy_to_useful_work_ratio']:.6f}"
     )
 
     print(
@@ -2234,22 +2066,19 @@ def main() -> int:
 
     parser.add_argument(
         "--fmu",
-        required=True,
         type=Path,
+        default=(
+            Path(__file__).resolve().parents[1]
+            / "models"
+            / "InductionMotorDigitalTwin18kW.fmu"
+        ),
         help="Path to the FMI 2.0 Co-Simulation FMU.",
-    )
-
-    parser.add_argument(
-        "--plant-profile",
-        choices=["auto", "legacy", "induction"],
-        default="auto",
-        help="Plant parameter profile; auto-detected from the FMU by default.",
     )
 
     parser.add_argument(
         "--scenario",
         choices=sorted(SCENARIOS),
-        default="combined",
+        default="combined_supported",
     )
 
     parser.add_argument(
@@ -2261,7 +2090,7 @@ def main() -> int:
     parser.add_argument(
         "--stop",
         type=float,
-        default=1800.0,
+        default=2700.0,
     )
 
     parser.add_argument(
@@ -2273,7 +2102,7 @@ def main() -> int:
     parser.add_argument(
         "--fault-time",
         type=float,
-        default=600.0,
+        default=350.0,
     )
 
     parser.add_argument(
@@ -2351,7 +2180,6 @@ def main() -> int:
         basyx_host=args.basyx_host,
         basyx_period_s=args.basyx_period,
         realtime=args.realtime,
-        plant_profile=args.plant_profile,
     )
 
     return 0
